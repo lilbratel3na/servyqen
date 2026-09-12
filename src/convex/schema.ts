@@ -32,12 +32,65 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
-    // add other tables here
+    // ---------------------------------------------------------------
+    // AgentGate V1: machine-to-service commerce layer
+    // ---------------------------------------------------------------
 
-    // tableName: defineTable({
-    //   ...
-    //   // table fields
-    // }).index("by_field", ["field"])
+    // A purchase of a service. The machine-readable contract itself lives in
+    // src/lib/agentgate-contract.ts (single source of truth); orders reference it by id.
+    orders: defineTable({
+      userId: v.id("users"),
+      serviceId: v.string(),
+      query: v.string(),
+      amount: v.string(), // e.g. "1" — denominated in the settlement token
+      currency: v.string(), // e.g. "USDC"
+      // awaiting_payment -> payment_confirmed -> executing -> completed
+      // with failed / expired side states.
+      status: v.string(),
+      moovePaymentLinkId: v.optional(v.string()),
+      moovePaymentUrl: v.optional(v.string()),
+      mooveLinkStatus: v.optional(v.string()), // active | completed | inactive (as reported by Moove)
+      mooveTransactionUrl: v.optional(v.string()),
+      error: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+      paymentConfirmedAt: v.optional(v.number()),
+      executionStartedAt: v.optional(v.number()),
+      completedAt: v.optional(v.number()),
+      executedMs: v.optional(v.number()), // measured wall-clock execution time
+    })
+      .index("by_userId", ["userId"])
+      .index("by_orderId_status", ["serviceId", "status"]),
+
+    // The research result produced by the service, if and only if execution ran.
+    researchResults: defineTable({
+      orderId: v.id("orders"),
+      query: v.string(),
+      sources: v.array(
+        v.object({
+          title: v.string(),
+          authors: v.array(v.string()),
+          published: v.string(),
+          absUrl: v.string(),
+          pdfUrl: v.string(),
+          summary: v.string(),
+        }),
+      ),
+      synthesis: v.string(),
+      keyFindings: v.array(v.string()),
+      confidence: v.number(),
+      sourcesCount: v.number(),
+      generatedAt: v.string(),
+      measuredMs: v.number(), // same wall-clock measurement as orders.executedMs
+      provider: v.string(),
+    }).index("by_orderId", ["orderId"]),
+
+    // Machine-readable receipt generated from persisted order + result data.
+    receipts: defineTable({
+      orderId: v.id("orders"),
+      receipt: v.any(),
+      createdAt: v.number(),
+    }).index("by_orderId", ["orderId"]),
   },
   {
     schemaValidation: false,
