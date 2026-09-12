@@ -4,7 +4,6 @@ import { action } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { RESEARCH_SERVICE } from "../lib/agentgate-contract";
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 40; // ~2 minutes of documented polling
@@ -28,7 +27,7 @@ export const initiateOrder = action({
     });
 
     const order = await ctx.runQuery(internal.orders.getByIdInternal, {
-      orderId: orderId as any,
+      orderId,
     });
     if (!order?.moovePaymentUrl) throw new Error("payment_url_missing");
 
@@ -86,13 +85,5 @@ export const runOrder = action({
       status: "awaiting_payment",
       error: "payment_confirmation_timeout",
     };
-  },
-});
-
-/** Agent-facing machine-readable contract endpoint (also served over HTTP). */
-export const getServiceContract = action({
-  args: {},
-  handler: async (): Promise<typeof RESEARCH_SERVICE> => {
-    return RESEARCH_SERVICE;
   },
 });

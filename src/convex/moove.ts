@@ -22,8 +22,11 @@
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import {
   MOOVE_BASE_URL,
+  MOOVE_LINK_VALIDITY_MS,
+  ORDER_EXPIRY_MS,
   RESEARCH_SERVICE,
 } from "../lib/agentgate-contract";
 
@@ -84,8 +87,11 @@ async function mooveFetch<T>(
  */
 export const initiateOrder = internalAction({
   args: { userId: v.id("users"), query: v.string() },
-  handler: async (ctx, args): Promise<{ orderId: string }> => {
+  handler: async (ctx, args): Promise<{ orderId: Id<"orders"> }> => {
     // 1. Create the real payment link for exactly 1 USDC-equivalent amount.
+    //    expirationDate is a documented field; it outlives our own order window
+    //    so the link can never stop accepting payments while the order is
+    //    still awaiting_payment.
     const link = await mooveFetch<MooveCreateLinkResponse>("/v1/payment-link", {
       method: "POST",
       body: JSON.stringify({
@@ -94,11 +100,14 @@ export const initiateOrder = internalAction({
         toAmount: RESEARCH_SERVICE.payment.amount,
         description: `${RESEARCH_SERVICE.id} — ${RESEARCH_SERVICE.name}: ${args.query.slice(0, 180)}`,
         maxUsage: 1, // single-use invoice: completes the moment it is paid
+        expirationDate: new Date(
+          Date.now() + MOOVE_LINK_VALIDITY_MS,
+        ).toISOString(),
       }),
     });
 
     // 2. Persist the order with the genuine payment id + URL.
-    const orderId: string = await ctx.runMutation(
+    const orderId: Id<"orders"> = await ctx.runMutation(
       internal.orders.createInternal,
       {
         userId: args.userId,
@@ -133,17 +142,6 @@ export const checkPayment = internalAction({
     if (!order) throw new Error("order_not_found");
     if (!order.moovePaymentLinkId) throw new Error("order_has_no_payment_link");
 
-    // Expiry is our own policy: stop reconciling stale unpaid orders.
-    if (order.status === "awaiting_payment" && Date.now() - order.createdAt > 30 * 60 * 1000) {
-      await ctx.runMutation(internal.orders.transitionInternal, {
-        orderId: args.orderId,
-        to: "expired",
-        mooveLinkStatus: "inactive",
-      });
-      return { status: "expired", mooveLinkStatus: "inactive", confirmed: false };
-    }
-
-    // Documented, public, unauthenticated single-link status endpoint.
     const link = await mooveFetch<MooveLinkData>(
       `/v1/payment-link/${encodeURIComponent(order.moovePaymentLinkId)}`,
     );
@@ -155,29 +153,47 @@ export const checkPayment = internalAction({
       });
     }
 
-    const confirmed = link.status === "completed";
+    // Confirmation: documented "completed" status, or the on-chain transaction
+    // URL Moove sets once a payment settles. Both mean the same thing for a
+    // maxUsage=1 link; either is genuine evidence of payment.
+    const confirmed = link.status === "completed" || !!link.transactionUrl;
+
     if (confirmed) {
       await ctx.runMutation(internal.orders.transitionInternal, {
         orderId: args.orderId,
         to: "payment_confirmed",
         mooveLinkStatus: link.status,
       });
-    } else {
-      // Not yet paid: observe the link status without any state transition.
-      await ctx.runMutation(internal.orders.observeLinkStatusInternal, {
+      const current = await ctx.runQuery(internal.orders.getByIdInternal, {
         orderId: args.orderId,
-        mooveLinkStatus: link.status,
       });
+      return {
+        status: current?.status ?? "payment_confirmed",
+        mooveLinkStatus: link.status,
+        confirmed: true,
+      };
     }
 
-    const current = await ctx.runQuery(internal.orders.getByIdInternal, {
+    // Unpaid: mark our own order expired after ORDER_EXPIRY_MS. Deliberately
+    // conservative and money-safe: the Moove link outlives this window
+    // (MOOVE_LINK_VALIDITY_MS > ORDER_EXPIRY_MS), so if the payer really does
+    // pay late, checkPayment can still transition expired -> payment_confirmed
+    // and the customer gets the service they paid for.
+    if (order.status === "awaiting_payment" && Date.now() - order.createdAt > ORDER_EXPIRY_MS) {
+      await ctx.runMutation(internal.orders.transitionInternal, {
+        orderId: args.orderId,
+        to: "expired",
+        mooveLinkStatus: link.status,
+      });
+      return { status: "expired", mooveLinkStatus: link.status, confirmed: false };
+    }
+
+    // Not yet paid: observe the link status without any state transition.
+    await ctx.runMutation(internal.orders.observeLinkStatusInternal, {
       orderId: args.orderId,
+      mooveLinkStatus: link.status,
     });
 
-    return {
-      status: current?.status ?? "unknown",
-      mooveLinkStatus: link.status,
-      confirmed,
-    };
+    return { status: order.status, mooveLinkStatus: link.status, confirmed: false };
   },
 });

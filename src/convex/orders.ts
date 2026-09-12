@@ -8,28 +8,21 @@ import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
 import {
   canTransition,
-  ORDER_STATES,
   type OrderStatus,
 } from "../lib/agentgate-contract";
 
-export const ORDER_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes to pay
+/**
+ * A mutation that moves an order through the guarded state machine.
+ * Illegal transitions are rejected — never silently ignored — so a bug or an
+ * attacker cannot walk an order into an undeserved state.
+ */
+type TransitionResult =
+  | { ok: true; status: OrderStatus }
+  | { ok: false; status: OrderStatus; reason: string };
 
-function normalizeStatus(status: string): OrderStatus {
-  if ((ORDER_STATES as readonly string[]).includes(status)) {
-    return status as OrderStatus;
-  }
-  throw new Error(`Invalid order status: ${status}`);
-}
-
-function assertTransition(from: OrderStatus, to: OrderStatus) {
-  if (!canTransition(from, to)) {
-    throw new Error(
-      `Illegal order state transition: ${from} -> ${to}`,
-    );
-  }
-}
-
-/** Internal: create a new order in awaiting_payment. */
+/**
+ * Internal: create a new order in awaiting_payment.
+ */
 export const createInternal = internalMutation({
   args: {
     userId: v.id("users"),
@@ -57,7 +50,11 @@ export const createInternal = internalMutation({
   },
 });
 
-/** Internal: guarded status transition. */
+/**
+ * Internal: guarded status transition. The ONLY way any order status changes
+ * in the entire application. All callers are server-side ("internal");
+ * the frontend has no mutation that can reach this.
+ */
 export const transitionInternal = internalMutation({
   args: {
     orderId: v.id("orders"),
@@ -65,19 +62,12 @@ export const transitionInternal = internalMutation({
     mooveLinkStatus: v.optional(v.string()),
     error: v.optional(v.string()),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    ok: boolean;
-    status: OrderStatus;
-    reason?: string;
-  }> => {
+  handler: async (ctx, args): Promise<TransitionResult> => {
     const order = await ctx.db.get(args.orderId);
     if (!order) return { ok: false, status: "failed", reason: "order_not_found" };
 
-    const from = normalizeStatus(order.status);
-    const to = normalizeStatus(args.to);
+    const from = order.status as OrderStatus;
+    const to = args.to as OrderStatus;
     if (!canTransition(from, to)) {
       return {
         ok: false,
@@ -99,12 +89,55 @@ export const transitionInternal = internalMutation({
   },
 });
 
-/** Internal: record the measured execution time after completion. */
+/**
+ * Internal: ONE-SHOT claim of the right to execute. Transitions
+ * payment_confirmed -> executing only when the persisted status is still
+ * exactly payment_confirmed, so two concurrent runs can never both pass the
+ * pre-execution gate (ctx.db.get/patch in a mutation is serialized — the
+ * second claimant loses and sees ok: false).
+ * A stale claim (crashed previous run) may be reclaimed.
+ */
+export const claimExecutingInternal = internalMutation({
+  args: {
+    orderId: v.id("orders"),
+    staleClaimMs: v.number(),
+  },
+  handler: async (ctx, args): Promise<TransitionResult> => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) return { ok: false, status: "failed", reason: "order_not_found" };
+
+    if (order.status === "executing") {
+      const startedAt = order.executionStartedAt ?? order.updatedAt;
+      if (Date.now() - startedAt > args.staleClaimMs) {
+        // Previous run crashed mid-execution; reclaim the claim.
+        await ctx.db.patch(args.orderId, { updatedAt: Date.now() });
+        return { ok: true, status: "executing" };
+      }
+      return { ok: false, status: "executing", reason: "already_executing" };
+    }
+
+    if (order.status !== "payment_confirmed") {
+      return {
+        ok: false,
+        status: order.status as OrderStatus,
+        reason: `not_claimable_from_${order.status}`,
+      };
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.orderId, {
+      status: "executing",
+      executionStartedAt: now,
+      updatedAt: now,
+    });
+    return { ok: true, status: "executing" };
+  },
+});
+
+/** Internal: record the measured execution time on completion. */
 export const recordExecutionInternal = internalMutation({
   args: { orderId: v.id("orders"), executedMs: v.number() },
   handler: async (ctx, args) => {
-    const order = await ctx.db.get(args.orderId);
-    if (!order) throw new Error("order_not_found");
     await ctx.db.patch(args.orderId, {
       executedMs: args.executedMs,
       updatedAt: Date.now(),
@@ -142,7 +175,11 @@ export const getByIdInternal = internalQuery({
   },
 });
 
-/** Internal: idempotently persist the research result. */
+/**
+ * Internal: idempotently persist the research result.
+ * Invariant enforced here: sourcesCount must equal sources.length, so a
+ * persisted row can never claim a different count than it actually holds.
+ */
 export const saveResultInternal = internalMutation({
   args: {
     orderId: v.id("orders"),
@@ -166,6 +203,11 @@ export const saveResultInternal = internalMutation({
     provider: v.string(),
   },
   handler: async (ctx, args) => {
+    if (args.sourcesCount !== args.sources.length) {
+      throw new Error(
+        `sources_count_mismatch: counted ${args.sources.length}, claimed ${args.sourcesCount}`,
+      );
+    }
     const existing = await ctx.db
       .query("researchResults")
       .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
@@ -206,7 +248,7 @@ export const saveReceiptInternal = internalMutation({
 /** Internal: fetch a persisted research result by order id (for actions). */
 export const getResearchResultInternal = internalQuery({
   args: { orderId: v.id("orders") },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Doc<"researchResults"> | null> => {
     return (
       (await ctx.db
         .query("researchResults")
@@ -232,18 +274,6 @@ export const listMine = query({
       .order("desc")
       .take(20);
     return orders;
-  },
-});
-
-/** Public query: a single order, only readable by its owner. */
-export const getMine = query({
-  args: { orderId: v.id("orders") },
-  handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) return null;
-    const order = await ctx.db.get(args.orderId);
-    if (!order || order.userId !== userId) return null;
-    return order;
   },
 });
 

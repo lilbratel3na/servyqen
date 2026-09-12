@@ -314,7 +314,8 @@ export default function Dashboard() {
                       </span>
                     </div>
                   )}
-                  {activeOrder.status === "awaiting_payment" && (
+                  {(activeOrder.status === "awaiting_payment" ||
+                    activeOrder.status === "expired") && (
                     <Button
                       className="w-full cursor-pointer"
                       variant="outline"

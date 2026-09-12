@@ -115,6 +115,28 @@ export const RESEARCH_SERVICE = {
   },
 } as const;
 
+/**
+ * Order payment window (our own expiry policy, shared by moove.ts).
+ * An unpaid order expires after this long — but the Moove link outlives the
+ * window (see MOOVE_LINK_VALIDITY_MS), so a genuinely late payment is still
+ * recoverable rather than silently stealing the payer's money.
+ */
+export const ORDER_EXPIRY_MS = 60 * 60 * 1000;
+
+/**
+ * Validity we request on every Moove payment link (expirationDate).
+ * Deliberately LONGER than ORDER_EXPIRY_MS so the link can never stop
+ * accepting payments while our order is still awaiting_payment.
+ */
+export const MOOVE_LINK_VALIDITY_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * An order stuck in `executing` for longer than this is considered a crashed
+ * run and may be reclaimed for a retry. Must exceed the worst-case execution
+ * budget (arXiv fetch + synthesis timeouts + Convex action overhead).
+ */
+export const EXECUTION_CLAIM_STALE_MS = 3 * 60 * 1000;
+
 /** The order state machine, enforced server-side. */
 export const ORDER_STATES = [
   "awaiting_payment",
@@ -133,7 +155,9 @@ export const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   executing: ["completed", "failed"],
   completed: [],
   failed: [],
-  expired: [],
+  // Recovery only: the Moove link stays payable longer than our order window,
+  // so a customer who genuinely paid after expiry must get the service.
+  expired: ["payment_confirmed"],
 };
 
 export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
