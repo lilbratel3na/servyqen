@@ -178,6 +178,7 @@ describe("buildReceipt", () => {
     amount: "1",
     currency: "USDC",
     paymentStatus: "completed" as string | null,
+    transactionUrl: "https://basescan.org/tx/0xabc" as string | null,
     executionStatus: "completed",
     executedMs: 4210,
     slaTargetMs: 5000,
@@ -195,6 +196,7 @@ describe("buildReceipt", () => {
   it("passes through known payment status and all persisted fields", () => {
     const receipt = buildReceipt(base) as Record<string, unknown>;
     expect(receipt["paymentStatus"]).toBe("completed");
+    expect(receipt["transactionUrl"]).toBe("https://basescan.org/tx/0xabc");
     expect(receipt["orderId"]).toBe("o123");
     expect(receipt["executedMs"]).toBe(4210);
     expect(receipt["resultHash"]).toBe("sha256:abc");
@@ -203,5 +205,10 @@ describe("buildReceipt", () => {
   it("never overstates payment: null status becomes 'unknown'", () => {
     const receipt = buildReceipt({ ...base, paymentStatus: null });
     expect(receipt["paymentStatus"]).toBe("unknown");
+  });
+
+  it("keeps tx evidence nullable, honestly absent when unreported", () => {
+    const receipt = buildReceipt({ ...base, transactionUrl: null });
+    expect(receipt["transactionUrl"]).toBeNull();
   });
 });
