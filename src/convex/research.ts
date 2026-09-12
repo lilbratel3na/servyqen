@@ -14,6 +14,11 @@
  *    is a real arXiv preprint with title, authors, date, abs URL and PDF URL.
  *    If fewer than five real entries come back, the order FAILS — it never
  *    pads with fabricated sources.
+ *  - Synthesis is DETERMINISTIC and EXTRACTIVE (src/lib/agentgate-pure.ts):
+ *    no language model, no network call, no credentials. Every synthesis
+ *    statement and key finding is quoted verbatim from a retrieved abstract,
+ *    and confidence is computed from retrieval relevance. Nothing is
+ *    generated, paraphrased, or fabricated.
  *  - executedMs is measured wall-clock time: Date.now() immediately before
  *    retrieval begins and immediately after the last source is synthesized.
  *  - The receipt is generated from PERSISTED transaction data (order + result
@@ -24,14 +29,13 @@ import { createHash } from "node:crypto";
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { vly } from "../lib/vly-integrations";
 import { RESEARCH_SERVICE, EXECUTION_CLAIM_STALE_MS } from "../lib/agentgate-contract";
 import {
   buildReceipt,
-  extractModelJson,
   parseArxivEntries,
+  RESULT_PROVIDER,
+  synthesizeExtractive,
   type ArxivSource,
-  type ModelAnalysis,
 } from "../lib/agentgate-pure";
 
 const ARXIV_API = "https://export.arxiv.org/api/query";
@@ -69,47 +73,6 @@ async function retrieveSources(query: string): Promise<ArxivSource[]> {
   return parsed.slice(0, REQUIRED_SOURCES);
 }
 
-/** Synthesize with the built-in vly completions gateway (AI models only). */
-async function synthesize(
-  query: string,
-  sources: ArxivSource[],
-): Promise<ModelAnalysis> {
-  const abstracts = sources
-    .map(
-      (s, i) =>
-        `[${i + 1}] "${s.title}" — ${s.authors.join(", ")} (${s.published})\nAbstract: ${s.summary}`,
-    )
-    .join("\n\n");
-
-  const result = await vly.ai.completion({
-    model: "gpt-4o-mini",
-    temperature: 0.2,
-    maxTokens: 900,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a research synthesis engine. You receive a research query and exactly five real arXiv abstracts. Synthesize ONLY what those abstracts support — never invent facts, claims, or sources. Respond with strict JSON of shape {\"synthesis\": string, \"keyFindings\": string[], \"confidence\": number} where confidence is in [0,1] and reflects how well the five abstracts actually answer the query.",
-      },
-      {
-        role: "user",
-        content: `Research query: ${query}\n\nThe five retrieved sources:\n\n${abstracts}`,
-      },
-    ],
-  });
-
-  if (!result.success || !result.data?.choices?.[0]?.message?.content) {
-    throw new Error(
-      `vly completions gateway failed: ${result.error ?? "empty response"}`,
-    );
-  }
-  const parsed = extractModelJson(result.data.choices[0].message.content);
-  if (!parsed) {
-    throw new Error("Model response was not parseable as the required JSON shape");
-  }
-  return parsed;
-}
-
 /** Deterministic SHA-256 over canonical JSON of the result. */
 function hashResult(result: unknown): string {
   return createHash("sha256").update(JSON.stringify(result)).digest("hex");
@@ -142,7 +105,8 @@ export const executeService = internalAction({
         const startedAt = Date.now();
 
         const sources = await retrieveSources(order.query);
-        const analysis = await synthesize(order.query, sources);
+        // Deterministic, credential-free synthesis over the five real abstracts.
+        const analysis = synthesizeExtractive(order.query, sources);
 
         const executedMs = Date.now() - startedAt;
         // ---- measured execution window ends ----
@@ -155,7 +119,7 @@ export const executeService = internalAction({
           sourcesCount: sources.length,
           generatedAt: new Date().toISOString(),
           measuredMs: executedMs,
-          provider: "arxiv-api + vly-ai-gateway",
+          provider: RESULT_PROVIDER,
         };
 
         if (result.sourcesCount !== REQUIRED_SOURCES) {

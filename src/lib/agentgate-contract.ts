@@ -92,19 +92,20 @@ export const RESEARCH_SERVICE = {
       synthesis: {
         type: "string",
         description:
-          "A synthesis of what the sources collectively say about the query.",
+          "Extractive synthesis of what the sources collectively say about the query: deterministic and produced without a language model; every statement is quoted verbatim from a retrieved abstract.",
       },
       keyFindings: {
         type: "array",
         items: { type: "string" },
-        description: "Concrete findings drawn from the retrieved sources.",
+        description:
+          "One finding per source: a verbatim excerpt selected from that source's abstract and attributed to the real paper title. Nothing is invented.",
       },
       confidence: {
         type: "number",
         minimum: 0,
         maximum: 1,
         description:
-          "Model-reported confidence, derived from the actual retrieval and synthesis step.",
+          "Computed deterministically (not model-reported): the fraction of the five retrieved sources whose title or abstract contains at least one meaningful term of the research query, in [0,1].",
       },
     },
   },

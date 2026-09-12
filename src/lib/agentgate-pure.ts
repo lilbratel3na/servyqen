@@ -73,44 +73,121 @@ export function parseArxivEntries(xml: string): ArxivSource[] {
   return sources;
 }
 
-/** Model analysis payload returned by the synthesis step. */
-export interface ModelAnalysis {
+/**
+ * Deterministic extractive analysis — no language model, no network, no
+ * credentials. Every output sentence is quoted VERBATIM from a retrieved
+ * abstract; confidence is computed from measured retrieval relevance.
+ * Nothing is invented, paraphrased, or padded.
+ */
+
+/** Provider label persisted with every research result. */
+export const RESULT_PROVIDER = "arxiv-api + extractive-synthesis (no LLM)";
+
+/** Analysis payload produced by the extractive synthesis step. */
+export interface ExtractiveAnalysis {
   synthesis: string;
   keyFindings: string[];
   confidence: number;
 }
 
+const STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has",
+  "have", "how", "in", "is", "it", "of", "on", "or", "that", "the", "to",
+  "was", "what", "when", "where", "which", "who", "why", "will", "with",
+]);
+
+/** Meaningful lowercase terms of a query (stop words and short tokens removed). */
+export function queryTerms(query: string): string[] {
+  return query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !STOP_WORDS.has(t));
+}
+
+/** Split text into sentences (original characters preserved). */
+export function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function termHits(text: string, terms: string[]): number {
+  const lower = text.toLowerCase();
+  return terms.reduce((acc, t) => acc + (lower.includes(t) ? 1 : 0), 0);
+}
+
 /**
- * Extract {synthesis, keyFindings, confidence} from model text that may be
- * wrapped in code fences or prose. Returns null when no parseable,
- * well-shaped object is present — callers treat null as an honest failure.
+ * Confidence = the fraction of the given sources whose title or abstract
+ * contains at least one meaningful query term. Deterministic, in [0,1].
  */
-export function extractModelJson(text: string): ModelAnalysis | null {
-  const withoutFences = text.replace(/```(?:json)?/g, "").trim();
-  const start = withoutFences.indexOf("{");
-  const end = withoutFences.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    const raw = JSON.parse(withoutFences.slice(start, end + 1)) as {
-      synthesis?: unknown;
-      keyFindings?: unknown;
-      confidence?: unknown;
-    };
-    if (typeof raw.synthesis !== "string" || raw.synthesis.length === 0) {
-      return null;
+export function computeConfidence(
+  query: string,
+  sources: ArxivSource[],
+): number {
+  if (sources.length === 0) return 0;
+  const terms = queryTerms(query);
+  const relevant = sources.filter(
+    (s) => termHits(`${s.title} ${s.summary}`, terms) > 0,
+  ).length;
+  return relevant / sources.length;
+}
+
+/**
+ * One verbatim finding per source: the abstract sentence most relevant to
+ * the query (first sentence as an honest fallback when none match),
+ * attributed to the real paper title.
+ */
+export function extractKeyFindings(
+  query: string,
+  sources: ArxivSource[],
+): string[] {
+  const terms = queryTerms(query);
+  return sources.map((source) => {
+    const sentences = splitSentences(source.summary);
+    let best = sentences[0] ?? source.summary;
+    let bestHits = -1;
+    for (const sentence of sentences) {
+      const hits = termHits(sentence, terms);
+      if (hits > bestHits) {
+        bestHits = hits;
+        best = sentence;
+      }
     }
-    const keyFindings = Array.isArray(raw.keyFindings)
-      ? raw.keyFindings.filter((f): f is string => typeof f === "string" && f.length > 0)
-      : [];
-    if (keyFindings.length === 0) return null;
-    const confidence =
-      typeof raw.confidence === "number" && Number.isFinite(raw.confidence)
-        ? Math.min(1, Math.max(0, raw.confidence))
-        : 0.5; // conservative neutral when the model reports none
-    return { synthesis: raw.synthesis, keyFindings, confidence };
-  } catch {
-    return null;
-  }
+    return `[${source.title}] ${best}`;
+  });
+}
+
+/**
+ * Extractive synthesis: verbatim lead sentence of each abstract, in
+ * retrieval order, with explicit "no language model" framing.
+ */
+export function buildSynthesis(query: string, sources: ArxivSource[]): string {
+  const lines = sources.map((s, i) => {
+    const lead = splitSentences(s.summary)[0] ?? s.summary;
+    const authors =
+      s.authors.slice(0, 3).join(", ") + (s.authors.length > 3 ? ", et al." : "");
+    return `[${i + 1}] ${lead} (${authors}, ${s.published})`;
+  });
+  return (
+    `Extractive synthesis for "${query}" from ${sources.length} arXiv sources ` +
+    "(deterministic, no language model; every statement is quoted verbatim " +
+    "from a source abstract): " +
+    lines.join(" ")
+  );
+}
+
+/** Combine the extractive pieces into the persisted analysis payload. */
+export function synthesizeExtractive(
+  query: string,
+  sources: ArxivSource[],
+): ExtractiveAnalysis {
+  return {
+    synthesis: buildSynthesis(query, sources),
+    keyFindings: extractKeyFindings(query, sources),
+    confidence: computeConfidence(query, sources),
+  };
 }
 
 /**

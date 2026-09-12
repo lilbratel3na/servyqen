@@ -9,9 +9,15 @@ import {
 } from "../lib/agentgate-contract";
 import {
   buildReceipt,
+  buildSynthesis,
+  computeConfidence,
   decodeXmlEntities,
-  extractModelJson,
+  extractKeyFindings,
   parseArxivEntries,
+  queryTerms,
+  RESULT_PROVIDER,
+  splitSentences,
+  synthesizeExtractive,
   type ArxivSource,
 } from "../lib/agentgate-pure";
 
@@ -64,6 +70,12 @@ describe("money-safety timing", () => {
     expect(RESEARCH_SERVICE.output.properties.sources.maxItems).toBe(5);
     expect(RESEARCH_SERVICE.execution.slaTargetMs).toBe(5000);
     expect(RESEARCH_SERVICE.execution.slaNote).toContain("TARGET");
+  });
+
+  it("describes confidence honestly as computed, never model-reported", () => {
+    const description = RESEARCH_SERVICE.output.properties.confidence.description;
+    expect(description).toContain("not model-reported");
+    expect(description).toContain("fraction");
   });
 });
 
@@ -132,41 +144,112 @@ describe("parseArxivEntries", () => {
   });
 });
 
-describe("extractModelJson", () => {
-  it("parses a clean JSON object", () => {
-    const analysis = extractModelJson(
-      '{"synthesis":"S","keyFindings":["a","b"],"confidence":0.8}',
+describe("deterministic extractive synthesis", () => {
+  const source = (overrides: Partial<ArxivSource> & { title: string; summary: string }): ArxivSource => ({
+    authors: ["A. Author"],
+    published: "2024-01-15",
+    absUrl: `http://arxiv.org/abs/${overrides.title.toLowerCase().replace(/\W+/g, "-")}`,
+    pdfUrl: "http://arxiv.org/pdf/x",
+    ...overrides,
+  });
+
+  const sources: ArxivSource[] = [
+    source({
+      title: "Attention Is All You Need",
+      summary:
+        "We propose the Transformer, a sequence model built on attention. Experiments show strong results on translation.",
+    }),
+    source({
+      title: "Scaling Laws for Neural Language Models",
+      summary:
+        "We study empirical scaling laws for language model performance on the cross-entropy loss.",
+    }),
+    source({
+      title: "Random unrelated paper",
+      summary: "This paper is about bird migration patterns across continents.",
+    }),
+  ];
+
+  it("extracts only meaningful query terms", () => {
+    expect(queryTerms("What are scaling laws in language models? the of")).toEqual([
+      "scaling",
+      "laws",
+      "language",
+      "models",
+    ]);
+  });
+
+  it("splits text into sentences and preserves content", () => {
+    expect(splitSentences("One. Two! Three? Four")).toEqual([
+      "One.",
+      "Two!",
+      "Three?",
+      "Four",
+    ]);
+  });
+
+  it("computes confidence as the fraction of topically matching sources", () => {
+    // Terms: ["models", "translation"]. Source 1 mentions "translation",
+    // source 2 mentions "Models" in its title; the bird paper matches neither.
+    expect(computeConfidence("models translation", sources)).toBe(2 / 3);
+    // "models" (plural) does not appear in source 1's singular "model" —
+    // substring matching is exact, so only the scaling-laws paper matches.
+    expect(computeConfidence("language models", sources)).toBe(1 / 3);
+  });
+
+  it("returns confidence 0 with no sources", () => {
+    expect(computeConfidence("anything", [])).toBe(0);
+  });
+
+  it("keeps confidence within [0,1] for any query", () => {
+    expect(computeConfidence("zzz nonexistent terms", sources)).toBe(0);
+    expect(computeConfidence("paper", sources)).toBeLessThanOrEqual(1);
+  });
+
+  it("emits one verbatim finding per source, attributed to the real title", () => {
+    const findings = extractKeyFindings("language models", sources);
+    expect(findings).toHaveLength(3);
+    for (let i = 0; i < sources.length; i++) {
+      expect(findings[i].startsWith(`[${sources[i]!.title}] `)).toBe(true);
+      // Every finding excerpt must be a substring of the actual abstract.
+      const excerpt = findings[i]!.slice(sources[i]!.title.length + 3);
+      expect(sources[i]!.summary.includes(excerpt)).toBe(true);
+    }
+  });
+
+  it("picks the most query-relevant sentence for the finding", () => {
+    const [first] = extractKeyFindings("translation", sources);
+    expect(first).toContain("strong results on translation");
+  });
+
+  it("falls back to the first sentence when nothing matches the query", () => {
+    const findings = extractKeyFindings("quantum chromodynamics", sources);
+    expect(findings[2]).toContain("bird migration patterns");
+  });
+
+  it("builds a synthesis that quotes abstracts verbatim and discloses no-LLM", () => {
+    const synthesis = buildSynthesis("language models", sources);
+    expect(synthesis).toContain("no language model");
+    expect(synthesis).toContain("We propose the Transformer, a sequence model built on attention.");
+    expect(synthesis).toContain("(A. Author, 2024-01-15)");
+  });
+
+  it("produces a complete, consistent analysis payload", () => {
+    const analysis = synthesizeExtractive("language models", sources);
+    expect(analysis.keyFindings).toHaveLength(sources.length);
+    expect(analysis.confidence).toBe(computeConfidence("language models", sources));
+    expect(analysis.synthesis.length).toBeGreaterThan(0);
+  });
+
+  it("labels the result provider as arXiv + extractive with no LLM", () => {
+    expect(RESULT_PROVIDER).toContain("arxiv-api");
+    expect(RESULT_PROVIDER).toContain("no LLM");
+  });
+
+  it("is deterministic: identical inputs produce identical output", () => {
+    expect(synthesizeExtractive("language models", sources)).toEqual(
+      synthesizeExtractive("language models", sources),
     );
-    expect(analysis).toEqual({
-      synthesis: "S",
-      keyFindings: ["a", "b"],
-      confidence: 0.8,
-    });
-  });
-
-  it("parses JSON wrapped in code fences or prose", () => {
-    const fenced = '```json\n{"synthesis":"S","keyFindings":["f"],"confidence":0.4}\n```';
-    expect(extractModelJson(fenced)?.confidence).toBe(0.4);
-    const prose = 'Here is the result: {"synthesis":"S","keyFindings":["f"],"confidence":0.9} hope it helps';
-    expect(extractModelJson(prose)?.synthesis).toBe("S");
-  });
-
-  it("clamps out-of-range confidence into [0,1]", () => {
-    expect(extractModelJson('{"synthesis":"S","keyFindings":["f"],"confidence":5}')?.confidence).toBe(1);
-    expect(extractModelJson('{"synthesis":"S","keyFindings":["f"],"confidence":-2}')?.confidence).toBe(0);
-  });
-
-  it("defaults missing confidence to a conservative 0.5", () => {
-    expect(extractModelJson('{"synthesis":"S","keyFindings":["f"]}')?.confidence).toBe(0.5);
-  });
-
-  it("rejects malformed or empty shapes", () => {
-    expect(extractModelJson("no json here")).toBeNull();
-    expect(extractModelJson('{"keyFindings":["f"]}')).toBeNull(); // no synthesis
-    expect(extractModelJson('{"synthesis":"S"}')).toBeNull(); // no findings
-    expect(extractModelJson('{"synthesis":"S","keyFindings":[1,2]}')).toBeNull();
-    expect(extractModelJson('{"synthesis":"","keyFindings":["f"]}')).toBeNull();
-    expect(extractModelJson('{"synthesis":"S","keyFindings":["f"],')).toBeNull(); // invalid JSON
   });
 });
 
