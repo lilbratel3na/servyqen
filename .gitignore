@@ -1,4 +1,5 @@
 .env.local
+.capability-token
 node_modules
 dist
 src/convex/_generated
