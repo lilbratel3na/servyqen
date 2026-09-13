@@ -86,7 +86,11 @@ async function mooveFetch<T>(
  * and persist the order with its payment link id and URL.
  */
 export const initiateOrder = internalAction({
-  args: { userId: v.id("users"), query: v.string() },
+  args: {
+    userId: v.optional(v.id("users")),
+    query: v.string(),
+    orderTokenHash: v.optional(v.string()),
+  },
   handler: async (ctx, args): Promise<{ orderId: Id<"orders"> }> => {
     // 1. Create the real payment link for exactly 1 USDC-equivalent amount.
     //    expirationDate is a documented field; it outlives our own order window
@@ -111,6 +115,7 @@ export const initiateOrder = internalAction({
       internal.orders.createInternal,
       {
         userId: args.userId,
+        orderTokenHash: args.orderTokenHash,
         serviceId: RESEARCH_SERVICE.id,
         query: args.query,
         amount: RESEARCH_SERVICE.payment.amount,

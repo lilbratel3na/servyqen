@@ -39,7 +39,10 @@ const schema = defineSchema(
     // A purchase of a service. The machine-readable contract itself lives in
     // src/lib/agentgate-contract.ts (single source of truth); orders reference it by id.
     orders: defineTable({
-      userId: v.id("users"),
+      // Convex-auth user for dashboard orders; machine orders created via
+      // POST /api/orders have no user and rely on their per-order capability
+      // token (orderTokenHash) for access instead.
+      userId: v.optional(v.id("users")),
       serviceId: v.string(),
       query: v.string(),
       amount: v.string(), // e.g. "1" — denominated in the settlement token
@@ -51,6 +54,10 @@ const schema = defineSchema(
       moovePaymentUrl: v.optional(v.string()),
       mooveLinkStatus: v.optional(v.string()), // active | completed | inactive (as reported by Moove)
       mooveTransactionUrl: v.optional(v.string()),
+      // Machine API access: SHA-256 hash of the one-time order capability
+      // token returned exactly once by POST /api/orders. The raw token is
+      // never stored.
+      orderTokenHash: v.optional(v.string()),
       error: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),

@@ -110,9 +110,16 @@ export const RESEARCH_SERVICE = {
     },
   },
   endpoints: {
+    discovery: "GET /api/services",
     contract: "GET /api/services/ai-research-v1/contract",
-    initiate: "POST order via authenticated app; returns Moove payment URL",
-    result: "GET order by id (authenticated) once status === completed",
+    initiate:
+      "POST /api/orders {query} -> 201 { orderId, paymentLinkId, paymentUrl, capabilityToken }; the capability token is a 256-bit per-order secret returned exactly once — only its hash is stored",
+    order:
+      "GET /api/orders/:id with Authorization: Bearer <capabilityToken> -> full machine-readable order state, result, and receipt",
+    run:
+      "POST /api/orders/:id/run with Authorization: Bearer <capabilityToken> -> polls genuine Moove confirmation server-side, then executes; nothing can fabricate a confirmation",
+    payment:
+      "The human completes the hosted Moove payment at paymentUrl. Agents do not spend from a wallet; machine-side confirmation comes only from Moove's documented status endpoint.",
   },
 } as const;
 

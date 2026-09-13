@@ -10,6 +10,7 @@ import {
   canTransition,
   type OrderStatus,
 } from "../lib/agentgate-contract";
+import { constantTimeHexEqual, isHex64 } from "../lib/agentgate-machine-pure";
 
 /**
  * A mutation that moves an order through the guarded state machine.
@@ -25,13 +26,14 @@ type TransitionResult =
  */
 export const createInternal = internalMutation({
   args: {
-    userId: v.id("users"),
+    userId: v.optional(v.id("users")),
     serviceId: v.string(),
     query: v.string(),
     amount: v.string(),
     currency: v.string(),
     paymentLinkId: v.string(),
     paymentUrl: v.string(),
+    orderTokenHash: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"orders">> => {
     const now = Date.now();
@@ -44,6 +46,9 @@ export const createInternal = internalMutation({
       status: "awaiting_payment",
       moovePaymentLinkId: args.paymentLinkId,
       moovePaymentUrl: args.paymentUrl,
+      ...(args.orderTokenHash !== undefined
+        ? { orderTokenHash: args.orderTokenHash }
+        : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -255,6 +260,46 @@ export const getResearchResultInternal = internalQuery({
         .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
         .first()) ?? null
     );
+  },
+});
+
+/**
+ * Machine API: fetch an order by id, authorized by the SHA-256 hash of its
+ * per-order capability token. No user identity is involved. Confirmed
+ * execution is included when present, so the machine sees the full
+ * machine-readable result. This is a read-only view — it can never mutate
+ * order state or confirm a payment.
+ */
+export const getByTokenHashInternal = internalQuery({
+  args: { orderId: v.id("orders"), tokenHash: v.string() },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    order: Doc<"orders">;
+    result: Doc<"researchResults"> | null;
+    receipt: Doc<"receipts"> | null;
+  } | null> => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) return null;
+    if (
+      !order.orderTokenHash ||
+      !isHex64(args.tokenHash) ||
+      !constantTimeHexEqual(order.orderTokenHash, args.tokenHash)
+    ) {
+      return null; // not found OR unauthorized — never distinguish
+    }
+    const result =
+      (await ctx.db
+        .query("researchResults")
+        .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+        .first()) ?? null;
+    const receipt =
+      (await ctx.db
+        .query("receipts")
+        .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+        .first()) ?? null;
+    return { order, result, receipt };
   },
 });
 

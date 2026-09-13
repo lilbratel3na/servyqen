@@ -16,6 +16,17 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
 
+/**
+ * The agent-facing API lives on the Convex deployment, not on this Vite
+ * host — point machine/API links there. Convex HTTP actions are served on
+ * the .convex.site host (the .convex.cloud host serves client RPC). This
+ * URL is public and carries no secrets.
+ */
+const CONVEX_URL = (import.meta.env.VITE_CONVEX_URL as string) ?? "";
+const API_BASE = CONVEX_URL.includes(".convex.cloud")
+  ? CONVEX_URL.replace(".convex.cloud", ".convex.site")
+  : CONVEX_URL;
+
 const steps = [
   {
     icon: Boxes,
@@ -30,7 +41,7 @@ const steps = [
   {
     icon: ShieldCheck,
     title: "Pay 1 USDC via Moove",
-    body: "A genuine Moove Agentic Payments payment link is created server-side. The agent pays the real link.",
+    body: "A genuine Moove Agentic Payments payment link is created server-side. A human completes the hosted payment — agents never spend from a wallet; confirmation comes only from Moove's status endpoint.",
   },
   {
     icon: BadgeCheck,
@@ -91,7 +102,7 @@ export default function Landing() {
           </a>
           <nav className="flex items-center gap-3">
             <a
-              href="/api/services"
+              href={`${API_BASE}/api/services`}
               target="_blank"
               rel="noreferrer"
               className="hidden text-sm text-slate-400 transition-colors hover:text-slate-200 sm:block"
@@ -155,7 +166,7 @@ export default function Landing() {
                 variant="outline"
                 className="cursor-pointer border-white/15 bg-white/5 text-slate-200 hover:bg-white/10"
               >
-                <a href="/api/services/ai-research-v1/contract" target="_blank" rel="noreferrer">
+                <a href={`${API_BASE}/api/services/ai-research-v1/contract`} target="_blank" rel="noreferrer">
                   <Terminal className="mr-1 size-4" />
                   Read the service contract
                 </a>
