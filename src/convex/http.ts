@@ -6,6 +6,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { auth } from "./auth";
 import { RESEARCH_SERVICE } from "../lib/agentgate-contract";
 import {
+  buildDiscoveryPayload,
   hashToken,
   isHex64,
   randomToken,
@@ -54,25 +55,10 @@ function orderIdFromPath(pathname: string): string | null {
 
 /** Discovery index: the list of services AgentGate exposes. */
 export const listServices = httpAction(async () => {
-  return new Response(
-    JSON.stringify(
-      {
-        protocol: RESEARCH_SERVICE.protocol,
-        services: [
-          {
-            id: RESEARCH_SERVICE.id,
-            name: RESEARCH_SERVICE.name,
-            version: RESEARCH_SERVICE.version,
-            price: `${RESEARCH_SERVICE.payment.amount} ${RESEARCH_SERVICE.payment.currency}`,
-            contractUrl: `/api/services/${RESEARCH_SERVICE.id}/contract`,
-          },
-        ],
-      },
-      null,
-      2,
-    ),
-    { status: 200, headers: jsonHeaders },
-  );
+  return new Response(JSON.stringify(buildDiscoveryPayload(), null, 2), {
+    status: 200,
+    headers: jsonHeaders,
+  });
 });
 
 /** Full machine-readable service contract for the AI Research service. */

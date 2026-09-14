@@ -6,6 +6,7 @@ import {
   RESEARCH_SERVICE,
 } from "./agentgate-contract";
 import {
+  buildDiscoveryPayload,
   constantTimeHexEqual,
   evaluateExecutionClaim,
   evaluateFailureRecovery,
@@ -168,6 +169,50 @@ describe("research payment gate accepts legitimate amounts above the minimum", (
 // the full HTTP->validation->link-creation chain is covered without any real
 // network call or payment.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// GET /api/services discovery: public price presentation communicates the
+// from/minimum form while keeping machine-readable pricing facts.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/services discovery payload", () => {
+  const svc = buildDiscoveryPayload().services[0]!;
+
+  it("presents the public price in from/minimum form", () => {
+    expect(svc.price).toBe("from 1 USDC");
+    expect(svc.price).not.toMatch(/^1 USDC$/);
+  });
+
+  it("exposes the exact machine-readable minimum as a decimal string", () => {
+    expect(svc.pricing.minimumAmount).toBe("1");
+    expect(typeof svc.pricing.minimumAmount).toBe("string");
+  });
+
+  it("exposes a numeric minimum convenience field for agents", () => {
+    expect(svc.pricing.minimumAmountValue).toBe(1);
+    expect(typeof svc.pricing.minimumAmountValue).toBe("number");
+  });
+
+  it("states the pricing model, currency, default, and non-editable payer amount", () => {
+    expect(svc.pricing.model).toBe("per_order_exact_amount");
+    expect(svc.pricing.currency).toBe("USDC");
+    expect(svc.pricing.defaultAmount).toBe("1");
+    expect(svc.pricing.payerEditable).toBe(false);
+  });
+
+  it("still points at the full contract for details", () => {
+    expect(svc.contractUrl).toBe("/api/services/ai-research-v1/contract");
+  });
+
+  it("is consistent with the validation minimum", () => {
+    // The advertised minimum and the enforced minimum are the same fact.
+    expect(svc.pricing.minimumAmount).toBe(RESEARCH_SERVICE.payment.minimumAmount);
+    expect(validateOrderAmount(svc.pricing.minimumAmount)).toEqual({
+      ok: true,
+      amount: svc.pricing.minimumAmount,
+    });
+  });
+});
 
 describe("initiateOrder passes the exact >1 amount to Moove (mocked)", () => {
   // Placeholder credential for the handler's config guard. fetch is stubbed,

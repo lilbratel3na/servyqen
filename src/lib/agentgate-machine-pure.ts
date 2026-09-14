@@ -246,3 +246,60 @@ export function validateOrderRequest(body: {
   if (!amount.ok) return amount;
   return { ok: true, query: q, amount: amount.amount };
 }
+
+// ---------------------------------------------------------------------------
+// Discovery index (GET /api/services).
+// Presentation-only: `price` communicates the FROM/minimum form for humans
+// and agents; the structured `pricing` object carries the machine-readable
+// facts (exact decimal-string minimum plus a numeric convenience field).
+// Validation authority remains validateOrderAmount — this payload never
+// feeds payment logic.
+// ---------------------------------------------------------------------------
+
+/** Shape of the GET /api/services discovery payload. */
+export interface DiscoveryPayload {
+  protocol: string;
+  services: Array<{
+    id: string;
+    name: string;
+    version: string;
+    price: string;
+    pricing: {
+      model: string;
+      currency: string;
+      /** Exact decimal string — canonical, no float loss. */
+      minimumAmount: string;
+      /** Numeric convenience for agents; the minimum is a whole number. */
+      minimumAmountValue: number;
+      /** Applied by POST /api/orders when the caller omits `amount`. */
+      defaultAmount: string;
+      /** The payer cannot edit the amount on the hosted checkout. */
+      payerEditable: boolean;
+    };
+    contractUrl: string;
+  }>;
+}
+
+/** Build the GET /api/services discovery payload. */
+export function buildDiscoveryPayload(): DiscoveryPayload {
+  return {
+    protocol: RESEARCH_SERVICE.protocol,
+    services: [
+      {
+        id: RESEARCH_SERVICE.id,
+        name: RESEARCH_SERVICE.name,
+        version: RESEARCH_SERVICE.version,
+        price: `from ${RESEARCH_SERVICE.payment.minimumAmount} ${RESEARCH_SERVICE.payment.currency}`,
+        pricing: {
+          model: "per_order_exact_amount",
+          currency: RESEARCH_SERVICE.payment.currency,
+          minimumAmount: RESEARCH_SERVICE.payment.minimumAmount,
+          minimumAmountValue: Number(RESEARCH_SERVICE.payment.minimumAmount),
+          defaultAmount: RESEARCH_SERVICE.payment.amount,
+          payerEditable: false,
+        },
+        contractUrl: `/api/services/${RESEARCH_SERVICE.id}/contract`,
+      },
+    ],
+  };
+}
