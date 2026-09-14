@@ -10,7 +10,12 @@ import {
   canTransition,
   type OrderStatus,
 } from "../lib/agentgate-contract";
-import { constantTimeHexEqual, isHex64 } from "../lib/agentgate-machine-pure";
+import {
+  constantTimeHexEqual,
+  evaluateExecutionClaim,
+  evaluateFailureRecovery,
+  isHex64,
+} from "../lib/agentgate-machine-pure";
 
 /**
  * A mutation that moves an order through the guarded state machine.
@@ -66,6 +71,9 @@ export const transitionInternal = internalMutation({
     to: v.string(),
     mooveLinkStatus: v.optional(v.string()),
     error: v.optional(v.string()),
+    failureKind: v.optional(
+      v.union(v.literal("transient"), v.literal("permanent")),
+    ),
   },
   handler: async (ctx, args): Promise<TransitionResult> => {
     const order = await ctx.db.get(args.orderId);
@@ -88,6 +96,7 @@ export const transitionInternal = internalMutation({
     if (to === "completed") patch.completedAt = now;
     if (args.mooveLinkStatus !== undefined) patch.mooveLinkStatus = args.mooveLinkStatus;
     if (args.error !== undefined) patch.error = args.error;
+    if (args.failureKind !== undefined) patch.failureKind = args.failureKind;
 
     await ctx.db.patch(args.orderId, patch);
     return { ok: true, status: to };
@@ -96,11 +105,16 @@ export const transitionInternal = internalMutation({
 
 /**
  * Internal: ONE-SHOT claim of the right to execute. Transitions
- * payment_confirmed -> executing only when the persisted status is still
- * exactly payment_confirmed, so two concurrent runs can never both pass the
- * pre-execution gate (ctx.db.get/patch in a mutation is serialized — the
- * second claimant loses and sees ok: false).
+ * payment_confirmed -> executing (fresh run) or failed_retriable -> executing
+ * (paid retry) only when the pure gate decision allows it, so two concurrent
+ * runs can never both pass the pre-execution gate (ctx.db.get/patch in a
+ * mutation is serialized — the second claimant loses and sees ok: false).
  * A stale claim (crashed previous run) may be reclaimed.
+ *
+ * The gate decision (evaluateExecutionClaim) independently requires PERSISTED
+ * payment confirmation evidence (paymentConfirmedAt) for EVERY claimable
+ * state — this is the hard payment gate that makes the retry path unusable by
+ * unpaid orders.
  */
 export const claimExecutingInternal = internalMutation({
   args: {
@@ -111,31 +125,71 @@ export const claimExecutingInternal = internalMutation({
     const order = await ctx.db.get(args.orderId);
     if (!order) return { ok: false, status: "failed", reason: "order_not_found" };
 
-    if (order.status === "executing") {
-      const startedAt = order.executionStartedAt ?? order.updatedAt;
-      if (Date.now() - startedAt > args.staleClaimMs) {
-        // Previous run crashed mid-execution; reclaim the claim.
-        await ctx.db.patch(args.orderId, { updatedAt: Date.now() });
-        return { ok: true, status: "executing" };
-      }
-      return { ok: false, status: "executing", reason: "already_executing" };
-    }
-
-    if (order.status !== "payment_confirmed") {
+    // Pure, unit-tested gate: hard payment gate + one-shot claim semantics.
+    const decision = evaluateExecutionClaim(
+      {
+        status: order.status,
+        paymentConfirmedAt: order.paymentConfirmedAt,
+        executionStartedAt: order.executionStartedAt,
+      },
+      args.staleClaimMs,
+    );
+    if (!decision.ok) {
       return {
         ok: false,
         status: order.status as OrderStatus,
-        reason: `not_claimable_from_${order.status}`,
+        reason: decision.reason ?? "claim_refused",
+      };
+    }
+
+    const now = Date.now();
+    // Refresh the one-shot claim timestamp (also the stale-claim heartbeat),
+    // count the genuine execution attempt, and clear the previous attempt's
+    // error on (re)claim.
+    await ctx.db.patch(args.orderId, {
+      status: "executing",
+      executionStartedAt: now,
+      updatedAt: now,
+      error: undefined,
+      executionAttempts: (order.executionAttempts ?? 0) + 1,
+    });
+    return { ok: true, status: "executing" };
+  },
+});
+
+/**
+ * Internal: recovery edge for orders that failed BEFORE the retry path
+ * existed (failed was terminal then). Re-queues onto failed_retriable ONLY
+ * when the order is genuinely paid (persisted paymentConfirmedAt) AND the
+ * recorded failure classifies as transient. Payment evidence, payment link,
+ * and transaction URL are untouched; no payment link is created.
+ */
+export const recoverFailedOrderInternal = internalMutation({
+  args: { orderId: v.id("orders") },
+  handler: async (ctx, args): Promise<TransitionResult> => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) return { ok: false, status: "failed", reason: "order_not_found" };
+
+    const decision = evaluateFailureRecovery({
+      status: order.status,
+      paymentConfirmedAt: order.paymentConfirmedAt,
+      error: order.error ?? "",
+    });
+    if (!decision.ok) {
+      return {
+        ok: false,
+        status: order.status as OrderStatus,
+        reason: decision.reason ?? "recovery_refused",
       };
     }
 
     const now = Date.now();
     await ctx.db.patch(args.orderId, {
-      status: "executing",
-      executionStartedAt: now,
+      status: "failed_retriable",
+      failureKind: "transient",
       updatedAt: now,
     });
-    return { ok: true, status: "executing" };
+    return { ok: true, status: "failed_retriable" };
   },
 });
 

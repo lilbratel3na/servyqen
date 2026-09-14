@@ -30,6 +30,7 @@ import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { RESEARCH_SERVICE, EXECUTION_CLAIM_STALE_MS } from "../lib/agentgate-contract";
+import { isTransientExecutionError } from "../lib/agentgate-machine-pure";
 import {
   buildReceipt,
   parseArxivEntries,
@@ -189,15 +190,25 @@ export const executeService = internalAction({
 
         return { ok: true };
       } catch (err) {
-        // Failure AFTER the claim: mark the claimed run failed. Failure of
-        // this inner block never conflates with the claim losing the race.
+        // Failure AFTER the claim: classify the attempt. A TRANSIENT
+        // provider/infrastructure failure (timeout, abort, network, provider
+        // 429/5xx) lands a PAID order on failed_retriable so it can be
+        // re-run at no charge; a PERMANENT contract/integrity failure
+        // (insufficient verifiable sources, price mismatch, postcondition
+        // violation) stays terminal `failed`. Either way NO result and NO
+        // receipt are persisted: only a genuinely successful execution may
+        // produce them — a failed attempt is never faked or reused.
         const message =
           err instanceof Error ? err.message : "unknown execution error";
-        await ctx.runMutation(internal.orders.transitionInternal, {
-          orderId: args.orderId,
-          to: "failed",
-          error: message,
-        }).catch(() => undefined);
+        const transient = isTransientExecutionError(message);
+        await ctx
+          .runMutation(internal.orders.transitionInternal, {
+            orderId: args.orderId,
+            to: transient ? "failed_retriable" : "failed",
+            error: message,
+            failureKind: transient ? "transient" : "permanent",
+          })
+          .catch(() => undefined);
         return { ok: false, error: message };
       }
     } catch (err) {

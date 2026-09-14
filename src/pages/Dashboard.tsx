@@ -31,6 +31,7 @@ type OrderStatus =
   | "executing"
   | "completed"
   | "failed"
+  | "failed_retriable"
   | "expired";
 
 const STATUS_STYLES: Record<OrderStatus, string> = {
@@ -39,6 +40,7 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
   executing: "border-sky-400/30 bg-sky-400/10 text-sky-300",
   completed: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
   failed: "border-red-400/30 bg-red-400/10 text-red-300",
+  failed_retriable: "border-orange-400/30 bg-orange-400/10 text-orange-300",
   expired: "border-slate-400/30 bg-slate-400/10 text-slate-400",
 };
 
@@ -315,7 +317,8 @@ export default function Dashboard() {
                     </div>
                   )}
                   {(activeOrder.status === "awaiting_payment" ||
-                    activeOrder.status === "expired") && (
+                    activeOrder.status === "expired" ||
+                    activeOrder.status === "failed_retriable") && (
                     <Button
                       className="w-full cursor-pointer"
                       variant="outline"
@@ -327,7 +330,9 @@ export default function Dashboard() {
                       ) : (
                         <CircleDot className="mr-2 size-4" />
                       )}
-                      Check payment &amp; execute
+                      {activeOrder.status === "failed_retriable"
+                        ? "Retry execution (already paid)"
+                        : "Check payment & execute"}
                     </Button>
                   )}
                 </CardContent>

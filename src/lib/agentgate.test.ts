@@ -43,7 +43,7 @@ describe("state machine", () => {
   });
 
   it("has no outgoing transitions from terminal states", () => {
-    for (const terminal of ["completed", "failed"] as const) {
+    for (const terminal of ["completed"] as const) {
       expect(ALLOWED_TRANSITIONS[terminal]).toEqual([]);
       for (const to of Object.keys(ALLOWED_TRANSITIONS)) {
         expect(canTransition(terminal, to as keyof typeof ALLOWED_TRANSITIONS)).toBe(
@@ -51,6 +51,18 @@ describe("state machine", () => {
         );
       }
     }
+  });
+
+  it("failed has exactly one guarded recovery edge (retry path), nothing else", () => {
+    // failed_retriable only: re-queueing additionally requires persisted
+    // payment confirmation evidence + a transient error (enforced in
+    // recoverFailedOrderInternal and unit-tested in agentgate-machine.test).
+    expect(ALLOWED_TRANSITIONS.failed).toEqual(["failed_retriable"]);
+    expect(canTransition("failed", "executing")).toBe(false);
+    expect(canTransition("failed", "payment_confirmed")).toBe(false);
+    expect(canTransition("failed", "completed")).toBe(false);
+    expect(canTransition("failed", "awaiting_payment")).toBe(false);
+    expect(canTransition("failed", "expired")).toBe(false);
   });
 
   it("never allows executing -> payment_confirmed (no re-confirmation)", () => {

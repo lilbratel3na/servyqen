@@ -48,8 +48,14 @@ const schema = defineSchema(
       amount: v.string(), // e.g. "1" — denominated in the settlement token
       currency: v.string(), // e.g. "USDC"
       // awaiting_payment -> payment_confirmed -> executing -> completed
-      // with failed / expired side states.
+      // with failed / expired side states. failed_retriable = a PAID order
+      // whose execution failed transiently (timeout/network/provider); it
+      // may re-enter executing via the one-shot claim without paying again.
       status: v.string(),
+      // "transient" | "permanent" when status is failed/failed_retriable.
+      // Transient execution failures are retryable; permanent contract
+      // failures (insufficient verifiable sources, integrity errors) are not.
+      failureKind: v.optional(v.union(v.literal("transient"), v.literal("permanent"))),
       moovePaymentLinkId: v.optional(v.string()),
       moovePaymentUrl: v.optional(v.string()),
       mooveLinkStatus: v.optional(v.string()), // active | completed | inactive (as reported by Moove)
@@ -59,6 +65,9 @@ const schema = defineSchema(
       // never stored.
       orderTokenHash: v.optional(v.string()),
       error: v.optional(v.string()),
+      // Number of genuine execution attempts (claimed runs). Incremented by
+      // claimExecutingInternal; exposed in the machine-readable order view.
+      executionAttempts: v.optional(v.number()),
       createdAt: v.number(),
       updatedAt: v.number(),
       paymentConfirmedAt: v.optional(v.number()),

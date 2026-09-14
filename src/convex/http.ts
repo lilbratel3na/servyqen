@@ -163,6 +163,12 @@ function renderOrderPayload(found: {
     mooveLinkStatus: order.mooveLinkStatus ?? null,
     transactionUrl: order.mooveTransactionUrl ?? null,
     error: order.error ?? null,
+    // "transient" | "permanent" for failed/failed_retriable orders: transient
+    // execution failures of PAID orders are re-runnable at no charge via
+    // POST /api/orders/:id/run (never a new payment link); permanent contract
+    // failures are terminal.
+    failureKind: order.failureKind ?? null,
+    executionAttempts: order.executionAttempts ?? 0,
     executedMs: order.executedMs ?? null,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
@@ -230,6 +236,16 @@ async function handleRunOrder(
     tokenHash,
   });
   if (!found) return errorJson(404, "not_found");
+
+  // Legacy recovery: an order left terminal `failed` by the pre-retry state
+  // machine is re-queued onto failed_retriable when it is genuinely PAID
+  // (persisted confirmation evidence) and its error classifies as transient.
+  // Refusals (unpaid, permanent failure, non-failed status) are benign no-ops;
+  // the execution claim enforces the same gates independently. Payment
+  // evidence and the payment link are untouched — no link is ever created.
+  await ctx.runMutation(internal.orders.recoverFailedOrderInternal, {
+    orderId: orderId as Id<"orders">,
+  });
 
   const run = await ctx.runAction(internal.machineapi.runMachineOrder, {
     orderId: orderId as Id<"orders">,

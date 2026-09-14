@@ -117,7 +117,7 @@ export const RESEARCH_SERVICE = {
     order:
       "GET /api/orders/:id with Authorization: Bearer <capabilityToken> -> full machine-readable order state, result, and receipt",
     run:
-      "POST /api/orders/:id/run with Authorization: Bearer <capabilityToken> -> polls genuine Moove confirmation server-side, then executes; nothing can fabricate a confirmation",
+      "POST /api/orders/:id/run with Authorization: Bearer <capabilityToken> -> polls genuine Moove confirmation server-side, then executes; nothing can fabricate a confirmation. A PAID order whose execution fails transiently (timeout/network/provider outage) lands in failed_retriable and can be re-run at no charge; a retry re-verifies payment with Moove and never creates a payment link. Permanent contract failures (e.g. fewer than 5 verifiable sources) are terminal failed.",
     payment:
       "The human completes the hosted Moove payment at paymentUrl. Agents do not spend from a wallet; machine-side confirmation comes only from Moove's documented status endpoint.",
   },
@@ -152,17 +152,31 @@ export const ORDER_STATES = [
   "executing",
   "completed",
   "failed",
+  "failed_retriable",
   "expired",
 ] as const;
 export type OrderStatus = (typeof ORDER_STATES)[number];
 
-/** Legal transitions of the state machine. */
+/**
+ * Legal transitions of the state machine.
+ *
+ * failed_retriable: a PAID order whose execution failed transiently
+ * (timeout / network / provider outage). It may re-enter execution through
+ * the one-shot claim, which independently requires persisted payment
+ * confirmation evidence (paymentConfirmedAt) — an unpaid order can never
+ * ride the retry path. There is deliberately NO edge back to
+ * payment_confirmed from failed_retriable: a retry re-verifies payment with
+ * Moove but must never rewrite the original paymentConfirmedAt evidence.
+ */
 export const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   awaiting_payment: ["payment_confirmed", "expired", "failed"],
   payment_confirmed: ["executing", "failed"],
-  executing: ["completed", "failed"],
+  executing: ["completed", "failed", "failed_retriable"],
   completed: [],
-  failed: [],
+  // Recovery only: orders failed before the retry path existed may be
+  // re-queued IF genuinely paid AND the recorded error is transient.
+  failed: ["failed_retriable"],
+  failed_retriable: ["executing"],
   // Recovery only: the Moove link stays payable longer than our order window,
   // so a customer who genuinely paid after expiry must get the service.
   expired: ["payment_confirmed"],
