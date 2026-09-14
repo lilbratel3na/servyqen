@@ -30,7 +30,10 @@ import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { RESEARCH_SERVICE, EXECUTION_CLAIM_STALE_MS } from "../lib/agentgate-contract";
-import { isTransientExecutionError } from "../lib/agentgate-machine-pure";
+import {
+  isTransientExecutionError,
+  isValidResearchAmount,
+} from "../lib/agentgate-machine-pure";
 import {
   buildReceipt,
   parseArxivEntries,
@@ -98,8 +101,12 @@ export const executeService = internalAction({
           orderId: args.orderId,
         });
         if (!order) throw new Error("order_not_found");
-        if (order.amount !== RESEARCH_SERVICE.payment.amount) {
-          throw new Error("amount_mismatch: order does not match contract price");
+        // Payment gate: the order's persisted amount must be a valid
+        // per-order price (>= 1 USDC minimum, <= 6 decimals). Amounts ABOVE
+        // the minimum are legitimate — the payer paid the order's exact
+        // requested price, whatever it was.
+        if (!isValidResearchAmount(order.amount)) {
+          throw new Error("amount_mismatch: order amount below/invalid for the service minimum");
         }
 
         // ---- measured execution window begins ----

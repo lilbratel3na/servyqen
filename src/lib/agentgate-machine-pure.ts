@@ -12,6 +12,8 @@
  * nonexistent order — the two are indistinguishable.
  */
 
+import { RESEARCH_SERVICE } from "./agentgate-contract";
+
 const encoder = new TextEncoder();
 
 const toHex = (bytes: Uint8Array): string =>
@@ -162,10 +164,70 @@ export function evaluateFailureRecovery(order: {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// Per-order amount validation (variable pricing, 1 USDC minimum).
+//
+// POST /api/orders accepts an optional `amount`: the EXACT price for that
+// order, denominated in USDC. Rules mirror the documented Moove payment-link
+// contract: string decimals only (avoid float rounding), at most 6 decimal
+// places (USDC precision, else Moove 422 INVALID_PAYMENT_LINK_AMOUNT), and
+// value >= the service minimum (1 USDC). The exact string is preserved
+// through order and receipt — never normalized ("2.50" stays "2.50").
+// ---------------------------------------------------------------------------
+
+const AMOUNT_RE = /^\d+(\.\d{1,6})?$/;
+
+/**
+ * Validate an optional per-order amount. `undefined` yields the service
+ * minimum (the documented default). Returns the EXACT input string on
+ * success — no normalization, no float math.
+ */
+export function validateOrderAmount(
+  input: unknown,
+): { ok: true; amount: string } | { ok: false; error: string } {
+  if (input === undefined) {
+    return { ok: true, amount: RESEARCH_SERVICE.payment.minimumAmount };
+  }
+  if (typeof input !== "string") {
+    return {
+      ok: false,
+      error:
+        'amount must be a string decimal in USDC, e.g. "1.50" (numbers are rejected to avoid float rounding)',
+    };
+  }
+  if (!AMOUNT_RE.test(input)) {
+    return {
+      ok: false,
+      error: 'amount must be a decimal string with at most 6 decimal places, e.g. "1.50"',
+    };
+  }
+  // Decimal-safe minimum check (no float arithmetic): value >= 1 iff the
+  // integer part, with leading zeros stripped, represents a number >= 1.
+  const intPart = input.split(".")[0] ?? "0";
+  const significant = intPart.replace(/^0+(?=\d)/, "");
+  if (significant === "0") {
+    return {
+      ok: false,
+      error: `amount must be at least ${RESEARCH_SERVICE.payment.minimumAmount} USDC`,
+    };
+  }
+  return { ok: true, amount: input };
+}
+
+/**
+ * Payment gate helper: an order's persisted amount is payable iff it is a
+ * valid per-order amount (>= the 1 USDC minimum, <= 6 decimals). Replaces
+ * the old exact-equality check so legitimate amounts ABOVE the minimum pass.
+ */
+export function isValidResearchAmount(amount: string): boolean {
+  return validateOrderAmount(amount).ok;
+}
+
 /** Validate the machine order request body for POST /api/orders. */
 export function validateOrderRequest(body: {
   query?: unknown;
-}): { ok: true; query: string } | { ok: false; error: string } {
+  amount?: unknown;
+}): { ok: true; query: string; amount: string } | { ok: false; error: string } {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, error: "request body must be a JSON object" };
   }
@@ -179,5 +241,8 @@ export function validateOrderRequest(body: {
       error: "query must be between 8 and 512 characters",
     };
   }
-  return { ok: true, query: q };
+  // Optional exact per-order amount; omitted -> the 1 USDC minimum.
+  const amount = validateOrderAmount(body.amount);
+  if (!amount.ok) return amount;
+  return { ok: true, query: q, amount: amount.amount };
 }

@@ -115,6 +115,7 @@ export const createOrder = httpAction(async (ctx, request) => {
   try {
     const orderId = await ctx.runAction(internal.machineapi.createMachineOrder, {
       query: check.query,
+      amount: check.amount,
       orderTokenHash: tokenHash,
     });
     const order = await ctx.runQuery(internal.orders.getByIdInternal, {

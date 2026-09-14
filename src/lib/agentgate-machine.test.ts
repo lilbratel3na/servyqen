@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ALLOWED_TRANSITIONS,
   canTransition,
+  RESEARCH_SERVICE,
 } from "./agentgate-contract";
 import {
   constantTimeHexEqual,
@@ -12,14 +13,24 @@ import {
   hashToken,
   isHex64,
   isTransientExecutionError,
+  isValidResearchAmount,
   randomToken,
+  validateOrderAmount,
   validateOrderRequest,
 } from "./agentgate-machine-pure";
 
 describe("POST /api/orders request validation", () => {
   it("accepts a valid query and trims surrounding whitespace", () => {
     const ok = validateOrderRequest({ query: "  scaling laws for LLMs  " });
-    expect(ok).toEqual({ ok: true, query: "scaling laws for LLMs" });
+    expect(ok).toEqual({ ok: true, query: "scaling laws for LLMs", amount: "1" });
+  });
+
+  it("defaults amount to the contract minimum when omitted", () => {
+    expect(validateOrderRequest({ query: "12345678" })).toEqual({
+      ok: true,
+      query: "12345678",
+      amount: RESEARCH_SERVICE.payment.minimumAmount,
+    });
   });
 
   it("rejects non-object bodies (null, arrays, primitives)", () => {
@@ -43,6 +54,186 @@ describe("POST /api/orders request validation", () => {
   it("rejects queries longer than 512 characters", () => {
     expect(validateOrderRequest({ query: "q".repeat(513) }).ok).toBe(false);
     expect(validateOrderRequest({ query: "q".repeat(512) }).ok).toBe(true);
+  });
+
+  it("rejects an invalid amount even when the query is valid", () => {
+    expect(validateOrderRequest({ query: "12345678", amount: "0.5" }).ok).toBe(false);
+    expect(validateOrderRequest({ query: "12345678", amount: "abc" }).ok).toBe(false);
+    expect(validateOrderRequest({ query: "12345678", amount: 1.5 }).ok).toBe(false);
+  });
+
+  it("accepts and preserves a valid custom amount exactly", () => {
+    const ok = validateOrderRequest({ query: "12345678", amount: "2.50" });
+    expect(ok).toEqual({ ok: true, query: "12345678", amount: "2.50" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-order variable pricing (1 USDC minimum, USDC 6-decimal precision).
+// ---------------------------------------------------------------------------
+
+describe("per-order amount validation (variable pricing)", () => {
+  it("omitted amount defaults to the 1 USDC minimum", () => {
+    expect(validateOrderAmount(undefined)).toEqual({ ok: true, amount: "1" });
+  });
+
+  it("accepts the exact minimum", () => {
+    expect(validateOrderAmount("1")).toEqual({ ok: true, amount: "1" });
+  });
+
+  it("accepts 1.5 and preserves the exact string", () => {
+    expect(validateOrderAmount("1.5")).toEqual({ ok: true, amount: "1.5" });
+  });
+
+  it("accepts 2.50 without normalizing it", () => {
+    expect(validateOrderAmount("2.50")).toEqual({ ok: true, amount: "2.50" });
+  });
+
+  it("accepts 1.000001 — exactly 6 decimals (USDC precision)", () => {
+    expect(validateOrderAmount("1.000001")).toEqual({ ok: true, amount: "1.000001" });
+  });
+
+  it("rejects amounts below the 1 USDC minimum, including decimal-only values", () => {
+    expect(validateOrderAmount("0.5").ok).toBe(false);
+    expect(validateOrderAmount("0.999999").ok).toBe(false);
+    expect(validateOrderAmount("0.000001").ok).toBe(false);
+    expect(validateOrderAmount("0").ok).toBe(false);
+    expect(validateOrderAmount("00").ok).toBe(false);
+  });
+
+  it("rejects malformed decimals", () => {
+    expect(validateOrderAmount("").ok).toBe(false);
+    expect(validateOrderAmount("1.").ok).toBe(false);
+    expect(validateOrderAmount(".5").ok).toBe(false);
+    expect(validateOrderAmount("1.5.5").ok).toBe(false);
+    expect(validateOrderAmount("1,50").ok).toBe(false);
+    expect(validateOrderAmount("1 50").ok).toBe(false);
+    expect(validateOrderAmount("-1").ok).toBe(false);
+    expect(validateOrderAmount("1e3").ok).toBe(false);
+    expect(validateOrderAmount(" 1 ").ok).toBe(false); // no trimming: exact string only
+    expect(validateOrderAmount("abc").ok).toBe(false);
+  });
+
+  it("rejects excessive precision (7+ decimals would 422 at Moove)", () => {
+    expect(validateOrderAmount("1.0000001").ok).toBe(false);
+    expect(validateOrderAmount("10.1234567").ok).toBe(false);
+  });
+
+  it("rejects non-string amounts (numbers are refused to avoid float rounding)", () => {
+    expect(validateOrderAmount(1).ok).toBe(false);
+    expect(validateOrderAmount(1.5).ok).toBe(false);
+    expect(validateOrderAmount(null).ok).toBe(false);
+    expect(validateOrderAmount({ amount: "1" }).ok).toBe(false);
+  });
+
+  it("accepts whole-number amounts above the minimum", () => {
+    expect(validateOrderAmount("2")).toEqual({ ok: true, amount: "2" });
+    expect(validateOrderAmount("100")).toEqual({ ok: true, amount: "100" });
+  });
+
+  it("accepts values with leading integer zeros only when >= 1", () => {
+    expect(validateOrderAmount("01")).toEqual({ ok: true, amount: "01" });
+    expect(validateOrderAmount("01.5")).toEqual({ ok: true, amount: "01.5" });
+  });
+});
+
+describe("research payment gate accepts legitimate amounts above the minimum", () => {
+  it("the persisted order amount must be a valid per-order price", () => {
+    expect(isValidResearchAmount("1")).toBe(true);
+    expect(isValidResearchAmount("1.5")).toBe(true);
+    expect(isValidResearchAmount("2.50")).toBe(true);
+    expect(isValidResearchAmount("12")).toBe(true);
+  });
+
+  it("the gate still refuses below-minimum or malformed persisted amounts", () => {
+    expect(isValidResearchAmount("0.5")).toBe(false);
+    expect(isValidResearchAmount("0")).toBe(false);
+    expect(isValidResearchAmount("")).toBe(false);
+    expect(isValidResearchAmount("1.0000001")).toBe(false);
+    expect(isValidResearchAmount("free")).toBe(false);
+  });
+
+  it("the contract advertises per-order pricing with a payer-editable checkout explicitly excluded", () => {
+    expect(RESEARCH_SERVICE.payment.minimumAmount).toBe("1");
+    expect(RESEARCH_SERVICE.payment.pricingModel).toContain("per_order_exact_amount");
+    expect(RESEARCH_SERVICE.payment.pricingModel).toContain("CANNOT edit");
+    expect(RESEARCH_SERVICE.endpoints.initiate).toContain("amount?");
+    expect(RESEARCH_SERVICE.endpoints.initiate).toContain("payer cannot edit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Successful >1 order path: the REAL initiateOrder handler is exercised with
+// a mocked fetch (standing in for the Moove API) and a mocked Convex ctx, so
+// the full HTTP->validation->link-creation chain is covered without any real
+// network call or payment.
+// ---------------------------------------------------------------------------
+
+describe("initiateOrder passes the exact >1 amount to Moove (mocked)", () => {
+  // Placeholder credential for the handler's config guard. fetch is stubbed,
+  // so this value never leaves the test process and is not a real secret.
+  process.env.MOOVE_API_KEY = "test-placeholder-key";
+
+  it("creates the payment link with toAmount exactly as requested", async () => {
+    const { initiateOrder } = await import("../convex/moove");
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ id: "link-123", url: "https://moove.xyz/@h/pay/link-123" }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const runMutation = vi.fn(async () => "order-abc" as never);
+      const ctx = { runMutation } as never;
+
+      // Convex function wrappers expose the raw handler as `_handler`.
+      const { orderId } = await (initiateOrder as any)._handler(ctx, {
+        userId: undefined,
+        query: "transformer scaling laws",
+        amount: "2.50",
+      } as never);
+
+      expect(orderId).toBe("order-abc");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("https://api.moove.xyz/v1/payment-link");
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      // The EXACT requested amount reaches Moove — not the default, not a float.
+      expect(body["toAmount"]).toBe("2.50");
+      expect(body["maxUsage"]).toBe(1);
+      // The order persists the exact amount alongside the real link.
+      const persistCall = runMutation.mock.calls[0] as unknown as [
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(persistCall[1]["amount"]).toBe("2.50");
+      expect(persistCall[1]["paymentLinkId"]).toBe("link-123");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("omitted amount defaults the link to the 1 USDC minimum", async () => {
+    const { initiateOrder } = await import("../convex/moove");
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ id: "link-456", url: "https://moove.xyz/@h/pay/link-456" }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const runMutation = vi.fn(async () => "order-def" as never);
+      await (initiateOrder as any)._handler({ runMutation } as never, {
+        userId: undefined,
+        query: "transformer scaling laws",
+      } as never);
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(JSON.parse(String(init.body))["toAmount"]).toBe(
+        RESEARCH_SERVICE.payment.minimumAmount,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

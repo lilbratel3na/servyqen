@@ -89,19 +89,23 @@ export const initiateOrder = internalAction({
   args: {
     userId: v.optional(v.id("users")),
     query: v.string(),
+    // Validated exact per-order price (validateOrderAmount, >= 1 USDC,
+    // <= 6 decimals). Defaults to the contract minimum when omitted.
+    amount: v.optional(v.string()),
     orderTokenHash: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ orderId: Id<"orders"> }> => {
-    // 1. Create the real payment link for exactly 1 USDC-equivalent amount.
-    //    expirationDate is a documented field; it outlives our own order window
-    //    so the link can never stop accepting payments while the order is
-    //    still awaiting_payment.
+    // 1. Create the real payment link for the caller's exact per-order
+    //    amount (>= 1 USDC; default "1"). expirationDate is a documented
+    //    field; it outlives our own order window so the link can never stop
+    //    accepting payments while the order is still awaiting_payment.
+    const amount = args.amount ?? RESEARCH_SERVICE.payment.minimumAmount;
     const link = await mooveFetch<MooveCreateLinkResponse>("/v1/payment-link", {
       method: "POST",
       body: JSON.stringify({
         // Denominated in the settlement token (USDC, 6 decimals per docs).
         // Sent as a string to avoid floating-point rounding (documented).
-        toAmount: RESEARCH_SERVICE.payment.amount,
+        toAmount: amount,
         description: `${RESEARCH_SERVICE.id} — ${RESEARCH_SERVICE.name}: ${args.query.slice(0, 180)}`,
         maxUsage: 1, // single-use invoice: completes the moment it is paid
         expirationDate: new Date(
@@ -118,7 +122,7 @@ export const initiateOrder = internalAction({
         orderTokenHash: args.orderTokenHash,
         serviceId: RESEARCH_SERVICE.id,
         query: args.query,
-        amount: RESEARCH_SERVICE.payment.amount,
+        amount,
         currency: RESEARCH_SERVICE.payment.currency,
         paymentLinkId: link.id,
         paymentUrl: link.url,

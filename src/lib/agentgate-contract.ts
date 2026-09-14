@@ -44,7 +44,13 @@ export const RESEARCH_SERVICE = {
     docs: "https://docs.moove.xyz",
     method: "moove_payment_link",
     currency: "USDC",
+    // Variable per-order pricing: each POST /api/orders names its EXACT price
+    // (>= minimumAmount). "amount" is the default applied when the caller
+    // omits `amount` — kept for backward compatibility with existing readers.
     amount: "1",
+    minimumAmount: "1",
+    pricingModel:
+      "per_order_exact_amount: the caller sets the exact price per order via the optional 'amount' string in POST /api/orders (default '1'). Minimum 1 USDC; at most 6 decimal places (USDC precision). The payer CANNOT edit the amount — the hosted Moove checkout enforces the order's fixed toAmount. Denominated in USDC, not USD.",
     amountUnit: "USDC (settlement token of the merchant's default wallet)",
     confirmation:
       "Payment is confirmed server-side by polling Moove's documented payment-link status endpoint until status === 'completed'. No frontend action can confirm a payment.",
@@ -113,7 +119,7 @@ export const RESEARCH_SERVICE = {
     discovery: "GET /api/services",
     contract: "GET /api/services/ai-research-v1/contract",
     initiate:
-      "POST /api/orders {query} -> 201 { orderId, paymentLinkId, paymentUrl, capabilityToken }; the capability token is a 256-bit per-order secret returned exactly once — only its hash is stored",
+      "POST /api/orders {query, amount?} -> 201 { orderId, paymentLinkId, paymentUrl, capabilityToken }; amount is the EXACT per-order price in USDC (default '1', minimum '1', at most 6 decimal places, string decimal — the payer cannot edit it at checkout); the capability token is a 256-bit per-order secret returned exactly once — only its hash is stored",
     order:
       "GET /api/orders/:id with Authorization: Bearer <capabilityToken> -> full machine-readable order state, result, and receipt",
     run:

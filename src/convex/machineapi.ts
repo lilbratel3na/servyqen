@@ -32,16 +32,20 @@ const MAX_POLLS = 40;
  * Machine order creation: creates ONE order with ONE genuine Moove payment
  * link via the existing Moove integration. userId is undefined for machine
  * orders; their access is exclusively the per-order capability token whose
- * SHA-256 hash (orderTokenHash) is passed in already computed.
+ * SHA-256 hash (orderTokenHash) is passed in already computed. `amount` is
+ * the validated exact per-order price (>= the 1 USDC minimum) from
+ * validateOrderAmount — forwarded unchanged to the Moove payment link.
  */
 export const createMachineOrder = internalAction({
   args: {
     query: v.string(),
+    amount: v.string(),
     orderTokenHash: v.string(),
   },
   handler: async (ctx, args): Promise<string> => {
     const { orderId } = await ctx.runAction(internal.moove.initiateOrder, {
       query: args.query,
+      amount: args.amount,
       orderTokenHash: args.orderTokenHash,
     });
     return orderId;
