@@ -41,7 +41,7 @@ import {
 
 const ARXIV_API = "https://export.arxiv.org/api/query";
 const REQUIRED_SOURCES = 5;
-const ARXIV_TIMEOUT_MS = 15_000;
+const ARXIV_TIMEOUT_MS = 30_000;
 
 /** Retrieve real sources from the arXiv API. Returns raw entries, no padding. */
 async function retrieveSources(query: string): Promise<ArxivSource[]> {
