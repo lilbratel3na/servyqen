@@ -59,7 +59,7 @@ export default function Landing() {
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-40 left-1/2 h-[420px] w-[720px] -translate-x-1/2 rounded-full bg-cyan-500/20 blur-[140px]"
+        className="pointer-events-none absolute -top-40 left-1/2 h-[420px] w-[720px] -translate-x-1/2 rounded-full bg-cyan-500/10 blur-[140px]"
       />
 
       {/* Nav */}
@@ -74,7 +74,7 @@ export default function Landing() {
 
       <main className="relative z-10">
         {/* Hero + service card */}
-        <section className="mx-auto max-w-6xl px-5 pb-14 pt-12 sm:px-6 sm:pt-20">
+        <section className="mx-auto max-w-6xl px-5 pb-16 pt-12 sm:px-6 sm:pt-20">
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
@@ -90,7 +90,7 @@ export default function Landing() {
             <h1 className="mt-5 text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
               Services with contracts
               <br />
-              <span className="bg-gradient-to-r from-cyan-300 via-sky-300 to-violet-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-cyan-300 to-sky-300 bg-clip-text text-transparent">
                 agents can buy from.
               </span>
             </h1>
@@ -176,7 +176,7 @@ export default function Landing() {
           <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
             How it works
           </h2>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
             {flow.map((s, i) => (
               <motion.div
                 key={s.title}
@@ -208,18 +208,14 @@ export default function Landing() {
           <p className="mt-2 text-sm text-slate-400">
             Evidence from a previous completed run, not a live transaction.
           </p>
-          <div className="mt-5 max-w-2xl rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.04] p-5 sm:p-6">
-            <div className="flex items-center gap-2">
-              <span className="flex size-5 items-center justify-center rounded-full bg-emerald-400/15">
-                <Check className="size-3 text-emerald-300" />
-              </span>
-              <Badge
-                variant="outline"
-                className="border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-              >
-                Completed
-              </Badge>
-            </div>
+          <div className="mt-5 max-w-2xl rounded-xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+            <Badge
+              variant="outline"
+              className="border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+            >
+              <Check className="mr-1 size-3" />
+              Completed
+            </Badge>
             <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
               {[
                 { label: "Service", value: "AI Research" },

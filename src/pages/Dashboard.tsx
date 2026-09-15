@@ -6,7 +6,6 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   ArrowUpRight,
-  BadgeCheck,
   Check,
   CircleDot,
   Copy,
@@ -14,7 +13,6 @@ import {
   FileJson,
   FlaskConical,
   Loader2,
-  Timer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -214,7 +212,7 @@ export default function Dashboard() {
           <p className="text-sm text-slate-500">
             Signed in as {user?.email ?? "guest"}
           </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+          <h1 className="mt-1 text-xl font-bold tracking-tight sm:text-2xl">
             New transaction
           </h1>
 
@@ -240,12 +238,10 @@ export default function Dashboard() {
                 Pay {MIN_AMOUNT} {CURRENCY} with Moove
               </Button>
               <p className="text-xs leading-relaxed text-slate-500">
-                Payment: {CURRENCY} · minimum {MIN_AMOUNT} {CURRENCY}. This
-                console starts each transaction at the {MIN_AMOUNT} {CURRENCY}{" "}
-                minimum; the machine API accepts an exact per-order amount (≥{" "}
-                {MIN_AMOUNT} {CURRENCY}, up to 6 decimal places). The amount is
-                fixed when the payment link is created and cannot be changed at
-                checkout. Payment is confirmed server-side through Moove.
+                This console starts transactions at the {MIN_AMOUNT} {CURRENCY}{" "}
+                minimum. The machine API accepts an exact per-order amount of at
+                least {MIN_AMOUNT} {CURRENCY} (up to 6 decimal places); the
+                amount is fixed once the payment link is created.
               </p>
             </CardContent>
           </Card>
@@ -306,9 +302,6 @@ export default function Dashboard() {
                         <span className="text-sm font-medium tracking-tight">
                           {serviceName(o.serviceId)}
                         </span>
-                        <span className="ml-auto text-xs text-slate-500">
-                          {formatDateTime(o.createdAt)}
-                        </span>
                       </div>
                       <p className="mt-1.5 truncate text-sm text-slate-300">
                         “{o.query}”
@@ -323,21 +316,18 @@ export default function Dashboard() {
                             ? formatMs(o.executedMs)
                             : "—"}
                         </span>
+                        <span>{formatDateTime(o.createdAt)}</span>
                       </p>
                     </button>
                   );
                 })}
               </div>
 
-              {selected && (
-                <p className="mt-3 text-xs text-slate-500">
-                  Selected transaction — details below cover payment,
-                  execution, service result, and receipt.
-                </p>
-              )}
-
               {/* State machine progress */}
-              <div className="mt-5 flex flex-wrap items-center gap-2">
+              <p className="mt-6 text-xs uppercase tracking-widest text-slate-500">
+                Transaction progress
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 {FLOW.map((s, i) => {
                   const reached =
                     status != null &&
@@ -380,7 +370,8 @@ export default function Dashboard() {
                 </p>
               )}
 
-              {/* Transaction detail sections */}
+              {/* Transaction detail sections — compact fact cards first,
+                  then full-width content sections. */}
               <div className="mt-8 grid gap-6 lg:grid-cols-2">
                 {/* Payment */}
                 <Card className="border-white/10 bg-white/[0.03] shadow-none">
@@ -443,6 +434,11 @@ export default function Dashboard() {
                         Complete the payment in the Moove checkout, then check
                         payment below. The link accepts exactly{" "}
                         {selected.amount} {selected.currency}.
+                      </p>
+                    )}
+                    {selected.paymentConfirmedAt != null && (
+                      <p className="pt-1 text-xs text-slate-500">
+                        Payment is confirmed server-side through Moove.
                       </p>
                     )}
                   </CardContent>
@@ -516,8 +512,9 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Service result */}
-                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                {/* Service result — full width so the research output gets
+                    the space its content needs. */}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none lg:col-span-2">
                   <CardHeader className="flex-row items-center justify-between">
                     <CardTitle className="text-base tracking-tight">
                       Service result
@@ -617,8 +614,8 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Receipt */}
-                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                {/* Receipt — full width, mirrors the result section. */}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none lg:col-span-2">
                   <CardHeader className="flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2 text-base tracking-tight">
                       <FileJson className="size-4 text-emerald-300" />
