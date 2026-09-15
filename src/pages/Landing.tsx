@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Link } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
 import { API_BASE } from "@/lib/api-base";
 import { RESEARCH_SERVICE } from "@/lib/agentgate-contract";
@@ -65,10 +66,17 @@ export default function Landing() {
       {/* Nav */}
       <header className="relative z-10 border-b border-white/5">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-6">
-          <a href="/" className="flex items-center gap-3" aria-label="Home">
+          {/* SPA link: a plain <a href="/"> would perform a full document
+              navigation on tap — observed as an apparent page "refresh" on
+              mobile. */}
+          <Link
+            to="/"
+            className="flex items-center gap-3"
+            aria-label="Home"
+          >
             <img src={logo} alt="Logo" className="h-9 w-9 rounded-lg" />
             <span className="font-bold tracking-tight">ProofFlow</span>
-          </a>
+          </Link>
         </div>
       </header>
 
@@ -104,9 +112,9 @@ export default function Landing() {
                 size="lg"
                 className="h-11 cursor-pointer bg-cyan-500 text-[#05070d] hover:bg-cyan-400"
               >
-                <a href="/auth?returnTo=%2Fdashboard">
+                <Link to="/auth?returnTo=%2Fdashboard">
                   {consoleLabel} <ArrowRight className="ml-1 size-4" />
-                </a>
+                </Link>
               </Button>
               <Button
                 asChild
