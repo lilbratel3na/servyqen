@@ -117,7 +117,12 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    /* Transparent: the document shell (html) paints the app background
+       (#05070d, set in index.html). A solid bg-background here is the light
+       theme's white — it painted white over the shell and caused the brief
+       full-white flashes observed on mobile during scroll/tap/lazy-load. */
+    background-color: transparent;
   }
   button:not([disabled]),
   [role="button"]:not([disabled]) {

@@ -15,11 +15,13 @@ const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
-// Simple loading fallback for route transitions
+// Simple loading fallback for route transitions. Painted in the app's dark
+// shell color so a lazy-chunk suspension can never expose a white frame on
+// mobile (the historical cause of the full-white flash during navigation).
 function RouteLoading() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Loading...</div>
+    <div className="flex min-h-screen items-center justify-center bg-[#05070d] text-slate-400">
+      <div className="animate-pulse">Loading…</div>
     </div>
   );
 }
@@ -61,7 +63,7 @@ class RootErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
+        <div className="flex min-h-screen items-center justify-center bg-[#05070d] p-6 text-foreground">
           <div className="max-w-lg text-center">
             <p className="text-sm font-semibold">Preview runtime error</p>
             <p className="mt-2 text-xs text-muted-foreground break-words">

@@ -1,7 +1,7 @@
 import { useQuery, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -107,6 +107,13 @@ export default function Dashboard() {
 
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  // Latches the first successful subscription delivery so a transient
+  // undefined (auth-token revalidation) can never unmount the transaction
+  // tree mid-interaction.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  useEffect(() => {
+    if (ordersQuery !== undefined) setHasLoadedOnce(true);
+  }, [ordersQuery]);
   // Selection: null = follow the newest transaction; otherwise the tapped id.
   // Falls back to the newest order when the id is unknown (e.g. after data
   // changes), so the page never renders a dangling selection.
@@ -253,12 +260,16 @@ export default function Dashboard() {
             Transactions
           </h2>
 
-          {ordersQuery === undefined ? (
+          {/* Render from cached state; only a genuine first load shows the
+              loading row. A transient undefined (e.g. auth-token revalidation)
+              must NOT unmount the list/detail tree — that remount cycle was
+              observed as rendering instability on mobile. */}
+          {ordersQuery === undefined && !hasLoadedOnce ? (
             <div className="mt-5 flex items-center gap-3 text-sm text-slate-400">
               <Loader2 className="size-4 animate-spin" />
               Loading transactions…
             </div>
-          ) : orders.length === 0 ? (
+          ) : orders.length === 0 && hasLoadedOnce ? (
             <Card className="mt-5 max-w-2xl border-white/10 bg-white/[0.03] shadow-none">
               <CardContent className="pt-6 text-sm text-slate-400">
                 No transactions yet. Enter a research query above to start one
