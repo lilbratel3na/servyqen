@@ -23,7 +23,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { LogoDropdown } from "@/components/LogoDropdown";
 import { useAuth } from "@/hooks/use-auth";
+import { API_BASE } from "@/lib/api-base";
 import { RESEARCH_SERVICE } from "@/lib/agentgate-contract";
+
+/** Human-facing price presentation derived from the service contract — the
+ * same single source of truth the machine API serves. This console currently
+ * orders at the minimum; the machine API supports exact per-order amounts. */
+const PRICE_DISPLAY = `from ${RESEARCH_SERVICE.payment.minimumAmount} ${RESEARCH_SERVICE.payment.currency}`;
+const MIN_AMOUNT = RESEARCH_SERVICE.payment.minimumAmount;
+const CURRENCY = RESEARCH_SERVICE.payment.currency;
 
 type OrderStatus =
   | "awaiting_payment"
@@ -82,7 +90,7 @@ export default function Dashboard() {
       const { paymentUrl } = await initiate({ query: query.trim() });
       window.open(paymentUrl, "_blank", "noopener,noreferrer");
       toast.success(
-        "Real Moove payment link created — complete the 1 USDC payment in the opened tab.",
+        `Real Moove payment link created — complete the ${MIN_AMOUNT} ${CURRENCY} payment in the opened tab.`,
       );
     } catch (err) {
       toast.error(
@@ -136,7 +144,7 @@ export default function Dashboard() {
             </Badge>
           </div>
           <a
-            href="/api/services/ai-research-v1/contract"
+            href={`${API_BASE}/api/services/ai-research-v1/contract`}
             target="_blank"
             rel="noreferrer"
             className="flex items-center gap-1 text-sm text-slate-400 transition-colors hover:text-slate-200"
@@ -167,11 +175,14 @@ export default function Dashboard() {
                   Price
                 </p>
                 <p className="mt-1 text-2xl font-bold tracking-tight">
-                  {RESEARCH_SERVICE.payment.amount}{" "}
-                  {RESEARCH_SERVICE.payment.currency}
+                  {PRICE_DISPLAY}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  via Moove payment link
+                  per-order exact amount via Moove payment link — this console
+                  orders at the {MIN_AMOUNT} {CURRENCY} minimum; the machine API
+                  accepts exact amounts ({MIN_AMOUNT} {CURRENCY} min, up to 6
+                  decimals). The amount is fixed at link creation — the payer
+                  cannot edit it at checkout.
                 </p>
               </CardContent>
             </Card>
@@ -248,12 +259,14 @@ export default function Dashboard() {
                   ) : (
                     <FlaskConical className="mr-2 size-4" />
                   )}
-                  Pay 1 USDC with Moove
+                  Pay {MIN_AMOUNT} {CURRENCY} with Moove
                 </Button>
                 <p className="text-xs leading-relaxed text-slate-500">
                   Creates a genuine Moove Agentic Payments payment link for
-                  exactly 1 USDC and opens the real checkout. Confirmation
-                  happens only when Moove reports the link paid.
+                  exactly {MIN_AMOUNT} {CURRENCY} — the {PRICE_DISPLAY} minimum
+                  — and opens the real checkout. The amount is fixed when the
+                  link is created; the payer cannot edit it at checkout.
+                  Confirmation happens only when Moove reports the link paid.
                 </p>
               </CardContent>
             </Card>

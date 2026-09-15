@@ -14,18 +14,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
+import { API_BASE } from "@/lib/api-base";
+import { RESEARCH_SERVICE } from "@/lib/agentgate-contract";
 import logo from "@/assets/logo.svg";
 
-/**
- * The agent-facing API lives on the Convex deployment, not on this Vite
- * host — point machine/API links there. Convex HTTP actions are served on
- * the .convex.site host (the .convex.cloud host serves client RPC). This
- * URL is public and carries no secrets.
- */
-const CONVEX_URL = (import.meta.env.VITE_CONVEX_URL as string) ?? "";
-const API_BASE = CONVEX_URL.includes(".convex.cloud")
-  ? CONVEX_URL.replace(".convex.cloud", ".convex.site")
-  : CONVEX_URL;
+/** Human-facing price presentation, derived from the service contract — the
+ * same single source of truth the machine API serves — so UI and API cannot
+ * drift apart. */
+const PRICE_DISPLAY = `from ${RESEARCH_SERVICE.payment.minimumAmount} ${RESEARCH_SERVICE.payment.currency}`;
+const MIN_AMOUNT = RESEARCH_SERVICE.payment.minimumAmount;
+const CURRENCY = RESEARCH_SERVICE.payment.currency;
 
 const steps = [
   {
@@ -40,8 +38,8 @@ const steps = [
   },
   {
     icon: ShieldCheck,
-    title: "Pay 1 USDC via Moove",
-    body: "A genuine Moove Agentic Payments payment link is created server-side. A human completes the hosted payment — agents never spend from a wallet; confirmation comes only from Moove's status endpoint.",
+    title: `Pay via Moove (${PRICE_DISPLAY})`,
+    body: `A genuine Moove Agentic Payments payment link is created server-side for an exact per-order amount (${PRICE_DISPLAY}, up to 6 decimal places). The amount is fixed when the link is created — the payer cannot edit it at checkout. A human completes the hosted payment; agents never spend from a wallet; confirmation comes only from Moove's status endpoint.`,
   },
   {
     icon: BadgeCheck,
@@ -144,11 +142,12 @@ export default function Landing() {
             </h1>
             <p className="max-w-2xl text-lg leading-relaxed text-slate-400">
               AgentGate is a commerce layer where an AI agent discovers a
-              service, reads its machine-readable contract, pays{" "}
-              <span className="text-slate-200">1 USDC</span> through a genuine
-              Moove payment, and receives a verifiable, machine-readable result
-              — in this V1, an AI research service returning exactly five real
-              sources.
+              service, reads its machine-readable contract, pays an exact
+              per-order amount ({""}
+              <span className="text-slate-200">{PRICE_DISPLAY}</span>) through a
+              genuine Moove payment, and receives a verifiable,
+              machine-readable result — in this V1, an AI research service
+              returning exactly five real sources.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Button
@@ -185,8 +184,8 @@ export default function Landing() {
               {
                 icon: Gauge,
                 label: "Price",
-                value: "1 USDC",
-                note: "via Moove payment link",
+                value: PRICE_DISPLAY,
+                note: "per-order exact amount via Moove payment link",
               },
               {
                 icon: CircuitBoard,
@@ -254,6 +253,85 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* Verified run — historical evidence from the already-completed
+            transaction. Static, clearly labelled as past evidence; contains
+            no capability token, credentials, or live transaction. */}
+        <section className="mx-auto max-w-6xl px-6 pb-24">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Verified run — previous completed transaction
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm text-slate-400">
+            Evidence from a previous completed run, not a live transaction.
+            The payment was confirmed by Moove; the result and receipt are
+            hashed and persisted.
+          </p>
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            {[
+              {
+                icon: ListChecks,
+                label: "Sources returned",
+                value: "5 real arXiv sources",
+              },
+              {
+                icon: BadgeCheck,
+                label: "Confidence",
+                value: "1.0 (100%) — deterministic",
+              },
+              {
+                icon: Gauge,
+                label: "Execution (measured)",
+                value: "526 ms",
+              },
+            ].map((c) => (
+              <div
+                key={c.label}
+                className="rounded-xl border border-white/10 bg-white/[0.03] p-5"
+              >
+                <c.icon className="size-5 text-emerald-300" />
+                <p className="mt-3 text-xs uppercase tracking-widest text-slate-500">
+                  {c.label}
+                </p>
+                <p className="mt-1 font-semibold tracking-tight">{c.value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+            <p className="text-xs uppercase tracking-widest text-slate-500">
+              Result hash (prefix)
+            </p>
+            <p className="mt-1 font-mono text-sm text-slate-300">
+              sha256:a0d26b3a…f512355
+            </p>
+            <p className="mt-3 text-xs uppercase tracking-widest text-slate-500">
+              Sources</p>
+            <ol className="mt-2 space-y-2">
+              {[
+                { n: 1, title: "PyramidTNT: Improved Transformer-in-Transformer Baselines with Pyramid Architecture", url: "http://arxiv.org/abs/2201.00978v1" },
+                { n: 2, title: "Learning to Cluster Faces via Transformer", url: "http://arxiv.org/abs/2104.11502v1" },
+                { n: 3, title: "MLP Can Be A Good Transformer Learner", url: "http://arxiv.org/abs/2404.05657v1" },
+                { n: 4, title: "Multi-Scale Implicit Transformer with Re-parameterize for Arbitrary-Scale Super-Resolution", url: "http://arxiv.org/abs/2403.06536v1" },
+                { n: 5, title: "Music Transformer", url: "http://arxiv.org/abs/1809.04281v3" },
+                ].map((s) => (
+                  <li key={s.n} className="text-sm">
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-cyan-300 hover:underline"
+                    >
+                      [{s.n}] {s.title}
+                    </a>
+                  </li>
+                ))}
+            </ol>
+          </div>
+          <p className="mt-3 text-xs text-slate-600">
+            Capability tokens, credentials, and full payment/transaction URLs are
+            never published. Payment was confirmed by Moove; on-chain evidence
+            exists but is not shown here.
+          </p>
+        </section>
+
         {/* CTA band */}
         <section className="mx-auto max-w-6xl px-6 pb-24">
           <div className="rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/10 via-transparent to-violet-500/10 p-8 sm:p-12">
@@ -261,8 +339,8 @@ export default function Landing() {
               One workflow. No wallets to manage, no fake test transactions.
             </h2>
             <p className="mt-3 max-w-2xl text-slate-400">
-              Sign in, read the contract, initiate a real Moove payment for 1
-              USDC, and watch the order move through
+              Sign in, read the contract, initiate a real Moove payment from{" "}
+              {MIN_AMOUNT} {CURRENCY}, and watch the order move through
               awaiting_payment → payment_confirmed → executing → completed.
             </p>
             <Button
