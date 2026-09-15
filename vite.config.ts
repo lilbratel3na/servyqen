@@ -92,9 +92,14 @@ export default defineConfig({
     // Bind to all interfaces so WebContainer's server-ready event fires.
     host: true,
     port: 5173,
-    // Keep HMR on, but disable full-screen error overlay
-    hmr: {
-      overlay: false,
-    },
+    // HMR must stay disabled on Freebuff: the managed dev process and the
+    // file-sync between editor and this environment emit file-change events
+    // that the Vite client (injected as @vite/client when HMR is on) answers
+    // with window.location.reload() — observed on mobile as spontaneous
+    // full-document reloads while scrolling/typing, plus reloads after the
+    // WS channel drops and dependency re-bundles. Setting hmr:false removes
+    // the injected HMR client entirely; edits then only load on the platform's
+    // own refresh, never from an in-page script.
+    hmr: false,
   },
 });
