@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useAction } from "convex/react";
+import { useQuery, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useState } from "react";
@@ -6,30 +6,26 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   ArrowUpRight,
-  Check,
+  BadgeCheck,
   CircleDot,
   Copy,
   ExternalLink,
   FileJson,
   FlaskConical,
   Loader2,
-  ShieldCheck,
   Timer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { LogoDropdown } from "@/components/LogoDropdown";
 import { useAuth } from "@/hooks/use-auth";
 import { API_BASE } from "@/lib/api-base";
 import { RESEARCH_SERVICE } from "@/lib/agentgate-contract";
 
-/** Human-facing price presentation derived from the service contract — the
- * same single source of truth the machine API serves. This console currently
- * orders at the minimum; the machine API supports exact per-order amounts. */
-const PRICE_DISPLAY = `from ${RESEARCH_SERVICE.payment.minimumAmount} ${RESEARCH_SERVICE.payment.currency}`;
+/** Console orders at the contract's minimum; the machine API supports exact
+ * per-order amounts. Derived from the contract so UI and API cannot drift. */
 const MIN_AMOUNT = RESEARCH_SERVICE.payment.minimumAmount;
 const CURRENCY = RESEARCH_SERVICE.payment.currency;
 
@@ -58,6 +54,18 @@ const FLOW: OrderStatus[] = [
   "executing",
   "completed",
 ];
+
+function formatMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} s` : `${ms} ms`;
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs uppercase tracking-widest text-slate-500">
+      {children}
+    </p>
+  );
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -90,7 +98,7 @@ export default function Dashboard() {
       const { paymentUrl } = await initiate({ query: query.trim() });
       window.open(paymentUrl, "_blank", "noopener,noreferrer");
       toast.success(
-        `Real Moove payment link created — complete the ${MIN_AMOUNT} ${CURRENCY} payment in the opened tab.`,
+        `Payment link created — complete the ${MIN_AMOUNT} ${CURRENCY} payment in the opened tab.`,
       );
     } catch (err) {
       toast.error(
@@ -122,26 +130,28 @@ export default function Dashboard() {
     }
   };
 
-  const copy = (value: unknown) => {
+  const copy = (value: unknown, label: string) => {
     navigator.clipboard
       .writeText(JSON.stringify(value, null, 2))
-      .then(() => toast.success("Copied JSON to clipboard."))
+      .then(() => toast.success(`Copied ${label} to clipboard.`))
       .catch(() => toast.error("Clipboard unavailable."));
   };
+
+  const status = activeOrder?.status as OrderStatus | undefined;
+  const isPaid =
+    status !== undefined &&
+    status !== "awaiting_payment" &&
+    status !== "expired";
+  const canRetry = status === "failed_retriable" || status === "expired";
+  const receiptData = receipt?.receipt as Record<string, unknown> | undefined;
 
   return (
     <div className="min-h-screen bg-[#05070d] text-slate-100">
       <header className="border-b border-white/5">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-6">
+          <div className="flex items-center gap-2">
             <LogoDropdown />
-            <span className="font-bold tracking-tight">AgentGate</span>
-            <Badge
-              variant="outline"
-              className="border-cyan-400/30 bg-cyan-400/10 text-cyan-300"
-            >
-              V1
-            </Badge>
+            <span className="font-bold tracking-tight">ProofFlow</span>
           </div>
           <a
             href={`${API_BASE}/api/services/ai-research-v1/contract`}
@@ -149,380 +159,471 @@ export default function Dashboard() {
             rel="noreferrer"
             className="flex items-center gap-1 text-sm text-slate-400 transition-colors hover:text-slate-200"
           >
-            Public contract endpoint <ExternalLink className="size-3.5" />
+            Contract <ExternalLink className="size-3.5" />
           </a>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        {/* Contract */}
+      <main className="mx-auto max-w-6xl px-5 py-8 sm:px-6 sm:py-10">
+        {/* New transaction */}
         <motion.section
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
           <p className="text-sm text-slate-500">
-            Signed in as {user?.email ?? "guest"} · Service contract
+            Signed in as {user?.email ?? "guest"}
           </p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight">
-            {RESEARCH_SERVICE.name}
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+            New transaction
           </h1>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="border-white/10 bg-white/[0.03] shadow-none">
-              <CardContent className="pt-6">
-                <p className="text-xs uppercase tracking-widest text-slate-500">
-                  Price
-                </p>
-                <p className="mt-1 text-2xl font-bold tracking-tight">
-                  {PRICE_DISPLAY}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  per-order exact amount via Moove payment link — this console
-                  orders at the {MIN_AMOUNT} {CURRENCY} minimum; the machine API
-                  accepts exact amounts ({MIN_AMOUNT} {CURRENCY} min, up to 6
-                  decimals). The amount is fixed at link creation — the payer
-                  cannot edit it at checkout.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-white/10 bg-white/[0.03] shadow-none">
-              <CardContent className="pt-6">
-                <p className="text-xs uppercase tracking-widest text-slate-500">
-                  Execution target
-                </p>
-                <p className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight">
-                  <Timer className="size-5 text-cyan-300" />
-                  {RESEARCH_SERVICE.execution.slaTargetMs} ms
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  target — measured per run, never guaranteed
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-white/10 bg-white/[0.03] shadow-none">
-              <CardContent className="pt-6">
-                <p className="text-xs uppercase tracking-widest text-slate-500">
-                  Required output
-                </p>
-                <p className="mt-1 text-lg font-bold tracking-tight">
-                  Exactly 5 sources
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  + synthesis, key findings, confidence
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-white/10 bg-white/[0.03] shadow-none">
-              <CardContent className="pt-6">
-                <p className="text-xs uppercase tracking-widest text-slate-500">
-                  Confirmation
-                </p>
-                <p className="mt-1 flex items-center gap-2 text-lg font-bold tracking-tight">
-                  <ShieldCheck className="size-5 text-emerald-300" />
-                  Server-side only
-                </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Moove status endpoint — not a UI button
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="mt-5 max-w-2xl border-white/10 bg-white/[0.03] shadow-none">
+            <CardContent className="space-y-3 pt-6">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Research query — e.g. scaling laws for sparse mixture-of-experts"
+                disabled={busy}
+                className="border-white/10 bg-white/5"
+              />
+              <Button
+                className="h-11 w-full cursor-pointer bg-cyan-500 text-[#05070d] hover:bg-cyan-400"
+                onClick={handleInitiate}
+                disabled={busy}
+              >
+                {busy ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <FlaskConical className="mr-2 size-4" />
+                )}
+                Pay {MIN_AMOUNT} {CURRENCY} with Moove
+              </Button>
+              <p className="text-xs leading-relaxed text-slate-500">
+                {RESEARCH_SERVICE.name} · minimum {MIN_AMOUNT} {CURRENCY} ·
+                execution target {RESEARCH_SERVICE.execution.slaTargetMs.toLocaleString()}{" "}
+                ms · the amount is fixed when the payment link is created and
+                cannot be changed at checkout. Payment is confirmed
+                server-side through Moove.
+              </p>
+            </CardContent>
+          </Card>
         </motion.section>
 
-        <Separator className="my-10 bg-white/5" />
+        {/* Transactions */}
+        <section className="mt-12">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
+            Transactions
+          </h2>
+          <p className="mt-2 text-sm text-slate-400">
+            Payment, execution, service result, and receipt for each
+            transaction.
+          </p>
 
-        {/* Order console */}
-        <section className="grid gap-6 lg:grid-cols-5">
-          <div className="lg:col-span-2 space-y-6">
-            <Card className="border-white/10 bg-white/[0.03] shadow-none">
-              <CardHeader>
-                <CardTitle className="tracking-tight">
-                  Start a transaction
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="e.g. scaling laws for sparse mixture-of-experts"
-                  disabled={busy}
-                  className="border-white/10 bg-white/5"
-                />
-                <Button
-                  className="w-full cursor-pointer bg-cyan-500 text-[#05070d] hover:bg-cyan-400"
-                  onClick={handleInitiate}
-                  disabled={busy}
-                >
-                  {busy ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                  ) : (
-                    <FlaskConical className="mr-2 size-4" />
-                  )}
-                  Pay {MIN_AMOUNT} {CURRENCY} with Moove
-                </Button>
-                <p className="text-xs leading-relaxed text-slate-500">
-                  Creates a genuine Moove Agentic Payments payment link for
-                  exactly {MIN_AMOUNT} {CURRENCY} — the {PRICE_DISPLAY} minimum
-                  — and opens the real checkout. The amount is fixed when the
-                  link is created; the payer cannot edit it at checkout.
-                  Confirmation happens only when Moove reports the link paid.
-                </p>
+          {!activeOrder ? (
+            <Card className="mt-5 max-w-2xl border-white/10 bg-white/[0.03] shadow-none">
+              <CardContent className="pt-6 text-sm text-slate-400">
+                No transactions yet. Enter a research query above to start
+                one — a Moove payment link is created for{" "}
+                {MIN_AMOUNT} {CURRENCY}.
               </CardContent>
             </Card>
-
-            {activeOrder && (
-              <Card className="border-white/10 bg-white/[0.03] shadow-none">
-                <CardHeader>
-                  <CardTitle className="tracking-tight">
-                    Live transaction
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Status</span>
-                    <Badge
-                      variant="outline"
-                      className={
-                        STATUS_STYLES[activeOrder.status as OrderStatus] ??
-                        "border-white/10"
-                      }
-                    >
-                      {activeOrder.status}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-slate-500">Payment link</span>
-                    <a
-                      href={activeOrder.moovePaymentUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1 text-cyan-300 hover:underline"
-                    >
-                      Open <ArrowUpRight className="size-3.5" />
-                    </a>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Moove status</span>
-                    <span className="font-mono text-xs">
-                      {activeOrder.mooveLinkStatus ?? "—"}
-                    </span>
-                  </div>
-                  {activeOrder.mooveTransactionUrl && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Tx</span>
-                      <a
-                        href={activeOrder.mooveTransactionUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1 text-cyan-300 hover:underline"
-                      >
-                        On-chain proof <ExternalLink className="size-3.5" />
-                      </a>
-                    </div>
-                  )}
-                  {activeOrder.executedMs != null && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Measured</span>
-                      <span className="font-mono text-xs">
-                        {activeOrder.executedMs} ms
-                      </span>
-                    </div>
-                  )}
-                  {(activeOrder.status === "awaiting_payment" ||
-                    activeOrder.status === "expired" ||
-                    activeOrder.status === "failed_retriable") && (
-                    <Button
-                      className="w-full cursor-pointer"
-                      variant="outline"
-                      onClick={handleRun}
-                      disabled={busy}
-                    >
-                      {busy ? (
-                        <Loader2 className="mr-2 size-4 animate-spin" />
-                      ) : (
-                        <CircleDot className="mr-2 size-4" />
-                      )}
-                      {activeOrder.status === "failed_retriable"
-                        ? "Retry execution (already paid)"
-                        : "Check payment & execute"}
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* Result + receipt */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* state machine progress */}
-            <Card className="border-white/10 bg-white/[0.03] shadow-none">
-              <CardContent className="pt-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  {FLOW.map((s, i) => {
-                    const order =
-                      activeOrder?.status === "completed" ? "completed" : activeOrder?.status;
-                    const reached =
-                      order != null &&
-                      FLOW.indexOf(order as OrderStatus) >= i &&
-                      order !== "failed" &&
-                      order !== "expired";
-                    return (
-                      <div key={s} className="flex items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={
-                            reached
-                              ? STATUS_STYLES[s]
-                              : "border-white/10 text-slate-600"
-                          }
-                        >
-                          {reached ? <Check className="mr-1 size-3" /> : null}
-                          {s}
-                        </Badge>
-                        {i < FLOW.length - 1 && (
-                          <span className="text-slate-700">→</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {activeOrder &&
-                    (activeOrder.status === "failed" ||
-                      activeOrder.status === "expired") && (
+          ) : (
+            <>
+              {/* Transaction summary row */}
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardContent className="pt-5">
+                    <SectionLabel>Status</SectionLabel>
+                    <div className="mt-2">
                       <Badge
                         variant="outline"
-                        className={STATUS_STYLES[activeOrder.status]}
+                        className={STATUS_STYLES[status!] ?? "border-white/10"}
                       >
-                        {activeOrder.status}
+                        {status}
                       </Badge>
-                    )}
-                </div>
-                {activeOrder?.error && (
-                  <p className="mt-3 break-words font-mono text-xs text-red-300">
-                    {activeOrder.error}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {result ? (
-              <Card className="border-white/10 bg-white/[0.03] shadow-none">
-                <CardHeader className="flex-row items-center justify-between">
-                  <CardTitle className="tracking-tight">
-                    Machine-readable result
-                  </CardTitle>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="cursor-pointer border-white/10"
-                    onClick={() => copy(result)}
-                  >
-                    <Copy className="mr-1 size-3.5" /> Copy JSON
-                  </Button>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-                    <span className="rounded border border-white/10 px-2 py-1 font-mono">
-                      sources: {result.sourcesCount}
-                    </span>
-                    <span className="rounded border border-white/10 px-2 py-1 font-mono">
-                      measured: {result.measuredMs} ms
-                    </span>
-                    <span className="rounded border border-white/10 px-2 py-1 font-mono">
-                      confidence: {(result.confidence * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-500">
-                      Synthesis
+                    </div>
+                    <p className="mt-2 truncate font-mono text-xs text-slate-500">
+                      {activeOrder.query}
                     </p>
-                    <p className="mt-1 text-sm leading-relaxed text-slate-300">
-                      {result.synthesis}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-500">
-                      Key findings
-                    </p>
-                    <ul className="mt-1 space-y-1">
-                      {result.keyFindings.map((f, i) => (
-                        <li key={i} className="text-sm leading-relaxed text-slate-300">
-                          • {f}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-500">
-                      Sources ({result.sources.length})
-                    </p>
-                    <ol className="mt-2 space-y-3">
-                      {result.sources.map((s, i) => (
-                        <li key={i} className="text-sm">
-                          <a
-                            href={s.absUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-medium text-cyan-300 hover:underline"
-                          >
-                            [{i + 1}] {s.title}
-                          </a>
-                          <p className="text-xs text-slate-500">
-                            {s.authors.join(", ")} · {s.published} ·{" "}
-                            <a
-                              href={s.pdfUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="hover:underline"
-                            >
-                              PDF
-                            </a>
-                          </p>
-                          <p className="mt-1 line-clamp-2 text-xs text-slate-400">
-                            {s.summary}
-                          </p>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              activeOrder &&
-              activeOrder.status !== "awaiting_payment" && (
-                <Card className="border-white/10 bg-white/[0.03] shadow-none">
-                  <CardContent className="flex items-center gap-3 pt-6 text-sm text-slate-400">
-                    <Loader2 className="size-4 animate-spin" />
-                    Waiting for the service to produce its result…
                   </CardContent>
                 </Card>
-              )
-            )}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardContent className="pt-5">
+                    <SectionLabel>Service</SectionLabel>
+                    <p className="mt-2 font-medium tracking-tight">
+                      {activeOrder.serviceId === RESEARCH_SERVICE.id
+                        ? "AI Research"
+                        : activeOrder.serviceId}
+                    </p>
+                    <p className="mt-1 truncate font-mono text-xs text-slate-500">
+                      {activeOrder.serviceId}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardContent className="pt-5">
+                    <SectionLabel>Amount</SectionLabel>
+                    <p className="mt-2 flex items-center gap-2 font-medium tracking-tight">
+                      <Timer className="size-4 text-cyan-300" />
+                      {activeOrder.amount} {activeOrder.currency}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      fixed at link creation
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardContent className="pt-5">
+                    <SectionLabel>Execution time</SectionLabel>
+                    <p className="mt-2 flex items-center gap-2 font-medium tracking-tight">
+                      <BadgeCheck className="size-4 text-emerald-300" />
+                      {activeOrder.executedMs != null
+                        ? formatMs(activeOrder.executedMs)
+                        : status === "completed"
+                          ? "—"
+                          : "pending"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      measured wall-clock · target{" "}
+                      {RESEARCH_SERVICE.execution.slaTargetMs.toLocaleString()} ms
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
 
-            {receipt && (
-              <Card className="border-white/10 bg-white/[0.03] shadow-none">
-                <CardHeader className="flex-row items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 tracking-tight">
-                    <FileJson className="size-5 text-emerald-300" />
-                    Transaction receipt
-                  </CardTitle>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="cursor-pointer border-white/10"
-                    onClick={() => copy(receipt.receipt)}
-                  >
-                    <Copy className="mr-1 size-3.5" /> Copy receipt
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  <pre className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-black/40 p-4 font-mono text-xs leading-relaxed text-slate-300">
-                    {JSON.stringify(receipt.receipt, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+              {/* State machine progress */}
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {FLOW.map((s, i) => {
+                  const reached =
+                    status != null &&
+                    FLOW.indexOf(status) >= i &&
+                    status !== "failed" &&
+                    status !== "expired";
+                  return (
+                    <div key={s} className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={
+                          reached
+                            ? STATUS_STYLES[s]
+                            : "border-white/10 text-slate-600"
+                        }
+                      >
+                        {s}
+                      </Badge>
+                      {i < FLOW.length - 1 && (
+                        <span className="text-slate-700">→</span>
+                      )}
+                    </div>
+                  );
+                })}
+                {(status === "failed" || status === "expired") && (
+                  <Badge variant="outline" className={STATUS_STYLES[status]}>
+                    {status}
+                  </Badge>
+                )}
+              </div>
+              {activeOrder.error && (
+                <p className="mt-3 break-words font-mono text-xs text-red-300">
+                  {activeOrder.error}
+                </p>
+              )}
+              {status === "failed_retriable" && (
+                <p className="mt-3 text-xs text-orange-300/80">
+                  A transient execution failure — this transaction is paid and
+                  can be re-run without paying again.
+                </p>
+              )}
+
+              {/* Transaction detail sections */}
+              <div className="mt-8 grid gap-6 lg:grid-cols-2">
+                {/* Payment */}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardHeader>
+                    <CardTitle className="text-base tracking-tight">
+                      Payment
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Amount</span>
+                      <span className="font-medium">
+                        {activeOrder.amount} {activeOrder.currency}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Moove status</span>
+                      <span className="font-mono text-xs">
+                        {activeOrder.mooveLinkStatus ?? "—"}
+                      </span>
+                    </div>
+                    {activeOrder.paymentConfirmedAt != null && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500">Confirmed</span>
+                        <span className="font-mono text-xs">
+                          {new Date(
+                            activeOrder.paymentConfirmedAt,
+                          ).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Checkout</span>
+                      {activeOrder.moovePaymentUrl ? (
+                        <a
+                          href={activeOrder.moovePaymentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex min-h-[44px] items-center gap-1 text-cyan-300 hover:underline"
+                        >
+                          Open Moove <ArrowUpRight className="size-3.5" />
+                        </a>
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </div>
+                    {activeOrder.mooveTransactionUrl && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500">Reference</span>
+                        <a
+                          href={activeOrder.mooveTransactionUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex min-h-[44px] items-center gap-1 text-cyan-300 hover:underline"
+                        >
+                          On-chain <ExternalLink className="size-3.5" />
+                        </a>
+                      </div>
+                    )}
+                    {status === "awaiting_payment" && (
+                      <p className="pt-1 text-xs leading-relaxed text-slate-500">
+                        Complete the payment in the Moove checkout, then check
+                        payment below. The link accepts exactly{" "}
+                        {activeOrder.amount} {activeOrder.currency}.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Execution */}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardHeader>
+                    <CardTitle className="text-base tracking-tight">
+                      Execution
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Status</span>
+                      <span className="font-mono text-xs">{status ?? "—"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Attempts</span>
+                      <span className="font-mono text-xs">
+                        {activeOrder.executionAttempts ?? 0}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Measured</span>
+                      <span className="font-mono text-xs">
+                        {activeOrder.executedMs != null
+                          ? formatMs(activeOrder.executedMs)
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">Target</span>
+                      <span className="font-mono text-xs">
+                        {RESEARCH_SERVICE.execution.slaTargetMs.toLocaleString()}{" "}
+                        ms (not a guarantee)
+                      </span>
+                    </div>
+                    {status === "awaiting_payment" && (
+                      <Button
+                        className="h-11 w-full cursor-pointer"
+                        variant="outline"
+                        onClick={handleRun}
+                        disabled={busy}
+                      >
+                        {busy ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <CircleDot className="mr-2 size-4" />
+                        )}
+                        Check payment &amp; execute
+                      </Button>
+                    )}
+                    {canRetry && (
+                      <Button
+                        className="h-11 w-full cursor-pointer"
+                        variant="outline"
+                        onClick={handleRun}
+                        disabled={busy}
+                      >
+                        {busy ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <CircleDot className="mr-2 size-4" />
+                        )}
+                        {status === "expired"
+                          ? "Payment arrived late — claim service"
+                          : "Retry execution (already paid)"}
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Service result */}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardHeader className="flex-row items-center justify-between">
+                    <CardTitle className="text-base tracking-tight">
+                      Service result
+                    </CardTitle>
+                    {result && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer border-white/10"
+                        onClick={() => copy(result, "result")}
+                      >
+                        <Copy className="mr-1 size-3.5" /> JSON
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {result ? (
+                      <>
+                        <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+                          <span className="rounded border border-white/10 px-2 py-1 font-mono">
+                            sources: {result.sourcesCount}
+                          </span>
+                          <span className="rounded border border-white/10 px-2 py-1 font-mono">
+                            measured: {formatMs(result.measuredMs)}
+                          </span>
+                          <span className="rounded border border-white/10 px-2 py-1 font-mono">
+                            confidence: {(result.confidence * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <div>
+                          <SectionLabel>Synthesis</SectionLabel>
+                          <p className="mt-1 text-sm leading-relaxed text-slate-300">
+                            {result.synthesis}
+                          </p>
+                        </div>
+                        <div>
+                          <SectionLabel>Key findings</SectionLabel>
+                          <ul className="mt-1 space-y-1">
+                            {result.keyFindings.map((f, i) => (
+                              <li
+                                key={i}
+                                className="text-sm leading-relaxed text-slate-300"
+                              >
+                                • {f}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <SectionLabel>
+                            Sources ({result.sources.length})
+                          </SectionLabel>
+                          <ol className="mt-2 space-y-3">
+                            {result.sources.map((s, i) => (
+                              <li key={i} className="text-sm">
+                                <a
+                                  href={s.absUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-medium text-cyan-300 hover:underline"
+                                >
+                                  [{i + 1}] {s.title}
+                                </a>
+                                <p className="text-xs text-slate-500">
+                                  {s.authors.join(", ")} · {s.published} ·{" "}
+                                  <a
+                                    href={s.pdfUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="hover:underline"
+                                  >
+                                    PDF
+                                  </a>
+                                </p>
+                                <p className="mt-1 line-clamp-2 text-xs text-slate-400">
+                                  {s.summary}
+                                </p>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      </>
+                    ) : isPaid ? (
+                      <div className="flex items-center gap-3 text-sm text-slate-400">
+                        <Loader2 className="size-4 animate-spin" />
+                        Waiting for the service to produce its result…
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        The result appears here after payment is confirmed and
+                        the service runs.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Receipt */}
+                <Card className="border-white/10 bg-white/[0.03] shadow-none">
+                  <CardHeader className="flex-row items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+                      <FileJson className="size-4 text-emerald-300" />
+                      Receipt
+                    </CardTitle>
+                    {receiptData && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer border-white/10"
+                        onClick={() => copy(receiptData, "receipt")}
+                      >
+                        <Copy className="mr-1 size-3.5" /> JSON
+                      </Button>
+                    )}
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {receiptData ? (
+                      <>
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <span className="rounded border border-emerald-400/20 bg-emerald-400/5 px-2 py-1 font-mono text-slate-300">
+                            hash:{" "}
+                            {String(receiptData.resultHash ?? "").slice(0, 19)}
+                            …
+                          </span>
+                          <span className="rounded border border-white/10 px-2 py-1 font-mono text-slate-300">
+                            payment: {String(receiptData.paymentStatus ?? "—")}
+                          </span>
+                        </div>
+                        <details>
+                          <summary className="cursor-pointer text-sm text-cyan-300 transition-colors hover:text-cyan-200">
+                            Machine-readable receipt
+                          </summary>
+                          <pre className="mt-2 max-h-72 overflow-auto rounded-lg border border-white/10 bg-black/40 p-4 font-mono text-xs leading-relaxed text-slate-300">
+                            {JSON.stringify(receiptData, null, 2)}
+                          </pre>
+                        </details>
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        The receipt is generated from the persisted transaction
+                        data after a successful run.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+            </>
+          )}
         </section>
       </main>
     </div>
