@@ -42,7 +42,7 @@ const serviceFacts = [
 
 export default function Landing() {
   const { isLoading, isAuthenticated } = useAuth();
-  const consoleLabel = isLoading ? "Loading…" : "Open Console";
+  const consoleLabel = isLoading ? "Loading…" : "Start";
   // An existing session (guest or email) goes straight to the Console instead
   // of flashing through the auth screen. While auth is still resolving — or
   // when signed out — /auth remains the safe target: it auto-redirects to
