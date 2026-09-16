@@ -6,12 +6,23 @@
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#05070d" />
   <title>Agent Service Layer</title>
-  <script type="module" crossorigin src="/assets/index-dujgeixa.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/react-vendor-DuzEwEsV.js">
-  <link rel="modulepreload" crossorigin href="/assets/framer-motion-DDBoZrQi.js">
-  <link rel="modulepreload" crossorigin href="/assets/radix-ui-LbW8WUHW.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-CFV2J-sM.css">
+  <style>
+    /* Paint the document shell in the app background BEFORE React mounts.
+       Without this, every pre-hydration frame, lazy-route suspension, and
+       heavy mobile repaint exposes the browser's default white canvas —
+       observed on-device as a brief full-white flash. */
+    html {
+      background: #05070d;
+      color-scheme: dark;
+    }
+  </style>
+  <script type="module" crossorigin src="/assets/index-BRMHACYz.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/react-vendor-twUPT20K.js">
+  <link rel="modulepreload" crossorigin href="/assets/framer-motion-CRk4231t.js">
+  <link rel="modulepreload" crossorigin href="/assets/radix-ui-C0riB2gQ.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-BQxJfdBo.css">
 </head>
 
 
