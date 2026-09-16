@@ -47,6 +47,19 @@ const STATUS_STYLES: Record<OrderStatus, string> = {
   expired: "border-slate-400/30 bg-slate-400/10 text-slate-400",
 };
 
+/** Human-readable status wording; the underlying machine tokens are shown
+ * verbatim only in the Execution card's mono status line, which mirrors the
+ * machine API. */
+const STATUS_LABELS: Record<OrderStatus, string> = {
+  awaiting_payment: "Awaiting payment",
+  payment_confirmed: "Payment confirmed",
+  executing: "Executing",
+  completed: "Completed",
+  failed: "Failed",
+  failed_retriable: "Failed — retry available",
+  expired: "Expired",
+};
+
 const FLOW: OrderStatus[] = [
   "awaiting_payment",
   "payment_confirmed",
@@ -308,7 +321,7 @@ export default function Dashboard() {
                           {oStatus === "completed" && (
                             <Check className="mr-1 size-3" />
                           )}
-                          {oStatus}
+                          {STATUS_LABELS[oStatus] ?? oStatus}
                         </Badge>
                         <span className="text-sm font-medium tracking-tight">
                           {serviceName(o.serviceId)}
@@ -355,7 +368,7 @@ export default function Dashboard() {
                             : "border-white/10 text-slate-600"
                         }
                       >
-                        {s}
+                        {STATUS_LABELS[s]}
                       </Badge>
                       {i < FLOW.length - 1 && (
                         <span className="text-slate-700">→</span>
@@ -363,9 +376,11 @@ export default function Dashboard() {
                     </div>
                   );
                 })}
-                {(status === "failed" || status === "expired") && (
+                {(status === "failed" ||
+                  status === "failed_retriable" ||
+                  status === "expired") && (
                   <Badge variant="outline" className={STATUS_STYLES[status]}>
-                    {status}
+                    {STATUS_LABELS[status]}
                   </Badge>
                 )}
               </div>
