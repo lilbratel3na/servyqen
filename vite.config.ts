@@ -94,12 +94,16 @@ export default defineConfig({
     port: 5173,
     // HMR must stay disabled on Freebuff: the managed dev process and the
     // file-sync between editor and this environment emit file-change events
-    // that the Vite client (injected as @vite/client when HMR is on) answers
-    // with window.location.reload() — observed on mobile as spontaneous
-    // full-document reloads while scrolling/typing, plus reloads after the
-    // WS channel drops and dependency re-bundles. Setting hmr:false removes
-    // the injected HMR client entirely; edits then only load on the platform's
-    // own refresh, never from an in-page script.
+    // that the Vite client answers with window.location.reload().
     hmr: false,
+    // The Vite dev server still injects /@vite/client even with hmr:false
+    // (verified in vite@7.3.6: devHtmlHook always prepends it), and that
+    // client opens a WebSocket whose 'vite:ws:disconnect' handler calls
+    // location.reload() once a visibility-gated ping succeeds — the cause of
+    // spontaneous full-document reloads on mobile while the dashboard sat
+    // idle. Setting ws:false makes createWebSocketServer return a no-op
+    // stub, so no WebSocket endpoint exists and the reload path can never
+    // arm. Edits still load via the platform's own refresh only.
+    ws: false,
   },
 });
