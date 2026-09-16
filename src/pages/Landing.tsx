@@ -41,8 +41,15 @@ const serviceFacts = [
 ];
 
 export default function Landing() {
-  const { isLoading } = useAuth();
+  const { isLoading, isAuthenticated } = useAuth();
   const consoleLabel = isLoading ? "Loading…" : "Open Console";
+  // An existing session (guest or email) goes straight to the Console instead
+  // of flashing through the auth screen. While auth is still resolving — or
+  // when signed out — /auth remains the safe target: it auto-redirects to
+  // /dashboard once an existing session is confirmed.
+  const consoleTarget = isAuthenticated
+    ? "/dashboard"
+    : "/auth?returnTo=%2Fdashboard";
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#05070d] text-slate-100">
@@ -112,7 +119,7 @@ export default function Landing() {
                 size="lg"
                 className="h-11 cursor-pointer bg-cyan-500 text-[#05070d] hover:bg-cyan-400"
               >
-                <Link to="/auth?returnTo=%2Fdashboard">
+                <Link to={consoleTarget}>
                   {consoleLabel} <ArrowRight className="ml-1 size-4" />
                 </Link>
               </Button>
