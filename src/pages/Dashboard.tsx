@@ -185,13 +185,22 @@ function TransactionGroups({
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const singleGroup = groups.length === 1;
 
+  // A group holding the selected transaction renders expanded without any
+  // open-state bookkeeping (the trivial single-group case is always a plain
+  // list). Other groups start collapsed ("Awaiting payment · 2") and the
+  // user can expand/collapse them at will.
+  const selectedGroup = selected
+    ? groups.find(([, items]) => items.some((o) => o._id === selected._id))?.[0]
+    : undefined;
+  const isCollapsedGroup = (status: OrderStatus, count: number) =>
+    count > 1 && status !== selectedGroup && !open[status];
+
   return (
     <div className="space-y-3">
       {groups.map(([groupStatus, items]) => {
-        const isCollapsedGroup = !singleGroup && !open[groupStatus];
         return (
           <div key={groupStatus}>
-            {isCollapsedGroup ? (
+            {isCollapsedGroup(groupStatus, items.length) ? (
               <button
                 type="button"
                 aria-expanded={false}
@@ -215,7 +224,7 @@ function TransactionGroups({
                 aria-label={`Transactions — ${STATUS_LABELS[groupStatus]}`}
                 className="space-y-2"
               >
-                {!singleGroup && (
+                {!singleGroup && items.length > 1 && (
                   <button
                     type="button"
                     aria-expanded={true}
@@ -586,23 +595,10 @@ export default function Dashboard() {
                           Open Moove payment link
                         </Button>
                       )}
-                      <Button
-                        className="h-11 w-full cursor-pointer"
-                        variant="outline"
-                        onClick={handleRun}
-                        disabled={busy}
-                      >
-                        {busy ? (
-                          <Loader2 className="mr-2 size-4 animate-spin" />
-                        ) : (
-                          <CircleDot className="mr-2 size-4" />
-                        )}
-                        Check payment &amp; execute
-                      </Button>
-                      <p className="text-xs leading-relaxed text-slate-500">
-                        Pay first at the Moove checkout — the link accepts
-                        exactly {selected.amount} {selected.currency}. Then
-                        check payment here to start execution.
+                      <p className="text-xs leading-relaxed text-slate-400">
+                        After paying, tap the same button to check payment and
+                        start execution — the link accepts exactly{" "}
+                        {selected.amount} {selected.currency}.
                       </p>
                     </div>
                   )}
@@ -677,7 +673,7 @@ export default function Dashboard() {
                 <div className="grid gap-6 lg:grid-cols-2">
                   <Card className="border-white/10 bg-white/[0.03] shadow-none">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-base tracking-tight">
+                      <CardTitle className="text-base tracking-tight text-slate-100">
                         Payment
                       </CardTitle>
                     </CardHeader>
@@ -687,6 +683,10 @@ export default function Dashboard() {
                         <span className="font-medium">
                           {selected.amount} {selected.currency}
                         </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500">Provider</span>
+                        <span>Moove Agentic Payments</span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Moove link status</span>
@@ -706,19 +706,6 @@ export default function Dashboard() {
                             : "—"}
                         </span>
                       </div>
-                      {selected.moovePaymentUrl && (
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-500">Checkout</span>
-                          <a
-                            href={selected.moovePaymentUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex min-h-[44px] items-center gap-1 text-cyan-300 hover:underline"
-                          >
-                            Open Moove <ArrowUpRight className="size-3.5" />
-                          </a>
-                        </div>
-                      )}
                       {selected.mooveTransactionUrl && (
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-slate-500">Reference</span>
@@ -738,7 +725,7 @@ export default function Dashboard() {
                   {/* Execution */}
                   <Card className="border-white/10 bg-white/[0.03] shadow-none">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-base tracking-tight">
+                      <CardTitle className="text-base tracking-tight text-slate-100">
                         Execution
                       </CardTitle>
                     </CardHeader>
@@ -781,7 +768,7 @@ export default function Dashboard() {
                   }`}
                 >
                   <CardHeader className="flex-row items-center justify-between pb-3">
-                    <CardTitle className="text-base tracking-tight">
+                    <CardTitle className="text-base tracking-tight text-slate-100">
                       Service result
                     </CardTitle>
                     {result && (
@@ -900,7 +887,7 @@ export default function Dashboard() {
                 {/* Receipt — verification / proof */}
                 <Card className="border-white/10 bg-white/[0.03] shadow-none">
                   <CardHeader className="flex-row items-center justify-between pb-3">
-                    <CardTitle className="flex items-center gap-2 text-base tracking-tight">
+                    <CardTitle className="flex items-center gap-2 text-base tracking-tight text-slate-100">
                       <FileJson className="size-4 text-emerald-300" />
                       Receipt
                     </CardTitle>
