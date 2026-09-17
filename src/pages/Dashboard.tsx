@@ -160,9 +160,10 @@ type OrderDoc = {
   createdAt: number;
 };
 
-/** Newest-first transaction history grouped by status, with a fully
- * interactive row per transaction. Collapsed groups are a summary only —
- * individual identity, timestamp, and query text stay visible on expand. */
+/** Newest-first transaction history grouped by status. Any status holding
+ * more than one transaction renders as a compact expandable summary row
+ * ("Awaiting payment · 2") whose header alone controls expansion; expanded
+ * rows keep full transaction identity, timestamps, and selection affordance. */
 function TransactionGroups({
   orders,
   selected,
@@ -183,32 +184,74 @@ function TransactionGroups({
   }, [orders]);
 
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const singleGroup = groups.length === 1;
 
-  // A group holding the selected transaction renders expanded without any
-  // open-state bookkeeping (the trivial single-group case is always a plain
-  // list). Other groups start collapsed ("Awaiting payment · 2") and the
-  // user can expand/collapse them at will.
-  const selectedGroup = selected
-    ? groups.find(([, items]) => items.some((o) => o._id === selected._id))?.[0]
-    : undefined;
-  const isCollapsedGroup = (status: OrderStatus, count: number) =>
-    count > 1 && status !== selectedGroup && !open[status];
+  const renderRow = (o: OrderDoc) => {
+    const isSelected = selected?._id === o._id;
+    return (
+      <button
+        key={o._id}
+        type="button"
+        role="option"
+        aria-selected={isSelected}
+        onClick={() => onSelect(o._id)}
+        className={`min-h-[44px] w-full cursor-pointer rounded-xl border p-4 text-left transition-colors ${
+          isSelected
+            ? "border-cyan-400/40 bg-cyan-400/[0.06]"
+            : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {isSelected && (
+            <span
+              aria-hidden
+              className="inline-block size-2 shrink-0 rounded-full bg-cyan-400"
+            />
+          )}
+          <span className="text-sm font-medium tracking-tight">
+            {serviceName(o.serviceId)}
+          </span>
+          <span className="font-mono text-xs text-slate-500">
+            {formatDateTime(o.createdAt)}
+          </span>
+        </div>
+        <p className="mt-1.5 line-clamp-1 text-sm text-slate-300">
+          “{o.query}”
+        </p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-slate-500">
+          <span>
+            {o.amount} {o.currency}
+          </span>
+          {o.executedMs != null && (
+            <span>exec: {formatMs(o.executedMs)}</span>
+          )}
+        </p>
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-3">
       {groups.map(([groupStatus, items]) => {
-        return (
-          <div key={groupStatus}>
-            {isCollapsedGroup(groupStatus, items.length) ? (
+        const expanded = !!open[groupStatus];
+        if (items.length > 1) {
+          // Multi-transaction group: the compact header alone controls
+          // expansion (collapsed by default, even when it holds the selected
+          // transaction). Expanded, each transaction stays individually
+          // selectable and clearly identified.
+          return (
+            <div key={groupStatus}>
               <button
                 type="button"
-                aria-expanded={false}
-                onClick={() => setOpen((prev) => ({ ...prev, [groupStatus]: true }))}
+                aria-expanded={expanded}
+                onClick={() =>
+                  setOpen((prev) => ({ ...prev, [groupStatus]: !expanded }))
+                }
                 className="flex min-h-[44px] w-full cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-left transition-colors hover:border-white/20 hover:bg-white/[0.05]"
               >
                 <span className="flex items-center gap-2 text-sm text-slate-300">
-                  <ChevronDown className="size-4 text-slate-500" />
+                  <ChevronDown
+                    className={`size-4 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`}
+                  />
                   {STATUS_LABELS[groupStatus]}
                 </span>
                 <Badge
@@ -218,78 +261,26 @@ function TransactionGroups({
                   {items.length}
                 </Badge>
               </button>
-            ) : (
-              <div
-                role="listbox"
-                aria-label={`Transactions — ${STATUS_LABELS[groupStatus]}`}
-                className="space-y-2"
-              >
-                {!singleGroup && items.length > 1 && (
-                  <button
-                    type="button"
-                    aria-expanded={true}
-                    onClick={() =>
-                      setOpen((prev) => ({ ...prev, [groupStatus]: false }))
-                    }
-                    className="flex min-h-[44px] w-full cursor-pointer items-center justify-between rounded-xl px-2 py-1 text-left text-sm text-slate-400 transition-colors hover:text-slate-200"
-                  >
-                    <span className="flex items-center gap-2">
-                      <ChevronDown className="size-4 rotate-180 text-slate-500" />
-                      {STATUS_LABELS[groupStatus]}
-                    </span>
-                    <Badge
-                      variant="outline"
-                      className={STATUS_STYLES[groupStatus] ?? "border-white/10"}
-                    >
-                      {items.length}
-                    </Badge>
-                  </button>
-                )}
-                {items.map((o) => {
-                  const isSelected = selected?._id === o._id;
-                  return (
-                    <button
-                      key={o._id}
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      onClick={() => onSelect(o._id)}
-                      className={`min-h-[44px] w-full cursor-pointer rounded-xl border p-4 text-left transition-colors ${
-                        isSelected
-                          ? "border-cyan-400/40 bg-cyan-400/[0.06]"
-                          : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        {isSelected && (
-                          <span
-                            aria-hidden
-                            className="inline-block size-2 shrink-0 rounded-full bg-cyan-400"
-                          />
-                        )}
-                        <span className="text-sm font-medium tracking-tight">
-                          {serviceName(o.serviceId)}
-                        </span>
-                        <span className="font-mono text-xs text-slate-500">
-                          {formatDateTime(o.createdAt)}
-                        </span>
-                      </div>
-                      <p className="mt-1.5 line-clamp-1 text-sm text-slate-300">
-                        “{o.query}”
-                      </p>
-                      <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-slate-500">
-                        <span>
-                          {o.amount} {o.currency}
-                        </span>
-                        {o.executedMs != null && (
-                          <span>exec: {formatMs(o.executedMs)}</span>
-                        )}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+              {expanded && (
+                <div
+                  role="listbox"
+                  aria-label={`Transactions — ${STATUS_LABELS[groupStatus]}`}
+                  className="mt-2 space-y-2"
+                >
+                  {items.map(renderRow)}
+                </div>
+              )}
+            </div>
+          );
+        }
+        return (
+          <div
+            key={groupStatus}
+            role="listbox"
+            aria-label={`Transactions — ${STATUS_LABELS[groupStatus]}`}
+            className="space-y-2"
+          >
+            {items.map(renderRow)}
           </div>
         );
       })}
@@ -342,7 +333,7 @@ export default function Dashboard() {
       setSelectedId(null); // follow the newly created (newest) transaction
       window.open(paymentUrl, "_blank", "noopener,noreferrer");
       toast.success(
-        `Payment link created — complete the ${MIN_AMOUNT} ${CURRENCY} payment in the opened tab.`,
+        "Payment link created — complete the payment in the opened tab.",
       );
     } catch (err) {
       toast.error(
@@ -427,8 +418,8 @@ export default function Dashboard() {
           </h1>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-400">
             Get a verifiable research brief — 5 real academic sources, synthesis,
-            key findings, and a confidence score — for {MIN_AMOUNT} {CURRENCY},
-            paid through Moove.
+            key findings, and a confidence score. Payment in {CURRENCY} ·
+            minimum {MIN_AMOUNT} {CURRENCY} · paid through Moove.
           </p>
 
           <Card className="mt-5 max-w-2xl border-white/10 bg-white/[0.03] shadow-none">
@@ -450,14 +441,17 @@ export default function Dashboard() {
                 ) : (
                   <FlaskConical className="mr-2 size-4" />
                 )}
-                Create payment link ({MIN_AMOUNT} {CURRENCY})
+                Create payment link
               </Button>
               <ol className="space-y-1 text-xs leading-relaxed text-slate-500">
                 <li>
                   1. A Moove payment link is created for this query — paying
                   does not start yet.
                 </li>
-                <li>2. Complete the {MIN_AMOUNT} {CURRENCY} payment at the Moove checkout.</li>
+                <li>
+                  2. Pay in {CURRENCY} at the Moove checkout (minimum {MIN_AMOUNT}{" "}
+                  {CURRENCY}).
+                </li>
                 <li>3. Payment is confirmed server-side, then the research runs and your result + receipt appear below.</li>
               </ol>
             </CardContent>
@@ -483,7 +477,8 @@ export default function Dashboard() {
             <Card className="mt-5 max-w-2xl border-white/10 bg-white/[0.03] shadow-none">
               <CardContent className="pt-6 text-sm text-slate-400">
                 No transactions yet. Enter a research query above to start one
-                — a Moove payment link is created for {MIN_AMOUNT} {CURRENCY}.
+                — a Moove payment link is created for the order's {CURRENCY}{" "}
+                amount (minimum {MIN_AMOUNT} {CURRENCY}).
               </CardContent>
             </Card>
           ) : !selected ? null : (
@@ -581,8 +576,7 @@ export default function Dashboard() {
                   {status === "awaiting_payment" && (
                     <div className="space-y-3">
                       <p className="text-sm text-slate-300">
-                        Waiting for your {selected.amount} {selected.currency}{" "}
-                        payment through Moove.
+                        Waiting for your {CURRENCY} payment through Moove.
                       </p>
                       {selected.moovePaymentUrl && (
                         <Button
@@ -597,8 +591,7 @@ export default function Dashboard() {
                       )}
                       <p className="text-xs leading-relaxed text-slate-400">
                         After paying, tap the same button to check payment and
-                        start execution — the link accepts exactly{" "}
-                        {selected.amount} {selected.currency}.
+                        start execution.
                       </p>
                     </div>
                   )}
@@ -680,17 +673,17 @@ export default function Dashboard() {
                     <CardContent className="space-y-2 text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Amount</span>
-                        <span className="font-medium">
+                        <span className="font-medium text-slate-100">
                           {selected.amount} {selected.currency}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Provider</span>
-                        <span>Moove Agentic Payments</span>
+                        <span className="text-slate-100">Moove Agentic Payments</span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Moove link status</span>
-                        <span className="font-mono text-xs">
+                        <span className="font-mono text-xs text-slate-200">
                           {selected.mooveLinkStatus ?? "—"}
                         </span>
                       </div>
@@ -700,7 +693,7 @@ export default function Dashboard() {
                             ? "Completed at"
                             : "Not yet completed"}
                         </span>
-                        <span className="font-mono text-xs">
+                        <span className="font-mono text-xs text-slate-200">
                           {selected.paymentConfirmedAt != null
                             ? new Date(selected.paymentConfirmedAt).toLocaleString()
                             : "—"}
@@ -732,17 +725,17 @@ export default function Dashboard() {
                     <CardContent className="space-y-2 text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Status</span>
-                        <span className="font-mono text-xs">{status ?? "—"}</span>
+                        <span className="font-mono text-xs text-slate-200">{status ?? "—"}</span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Attempts</span>
-                        <span className="font-mono text-xs">
+                        <span className="font-mono text-xs text-slate-200">
                           {selected.executionAttempts ?? 0}
                         </span>
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Measured</span>
-                        <span className="font-mono text-xs">
+                        <span className="font-mono text-xs text-slate-200">
                           {selected.executedMs != null
                             ? formatMs(selected.executedMs)
                             : "—"}
@@ -750,7 +743,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-slate-500">Target</span>
-                        <span className="font-mono text-xs">
+                        <span className="font-mono text-xs text-slate-200">
                           {RESEARCH_SERVICE.execution.slaTargetMs.toLocaleString()}{" "}
                           ms (not a guarantee)
                         </span>
@@ -908,19 +901,19 @@ export default function Dashboard() {
                         <div className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-slate-500">Payment status</span>
-                            <span className="font-mono text-xs">
+                            <span className="font-mono text-xs text-slate-200">
                               {String(receiptData.paymentStatus ?? "—")}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-slate-500">Execution status</span>
-                            <span className="font-mono text-xs">
+                            <span className="font-mono text-xs text-slate-200">
                               {String(receiptData.executionStatus ?? "—")}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-slate-500">Executed in</span>
-                            <span className="font-mono text-xs">
+                            <span className="font-mono text-xs text-slate-200">
                               {typeof receiptData.executedMs === "number"
                                 ? formatMs(receiptData.executedMs)
                                 : "—"}
@@ -928,7 +921,7 @@ export default function Dashboard() {
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-slate-500">Result hash</span>
-                            <span className="truncate font-mono text-xs">
+                            <span className="truncate font-mono text-xs text-slate-200">
                               {String(receiptData.resultHash ?? "").slice(0, 19)}…
                             </span>
                           </div>
