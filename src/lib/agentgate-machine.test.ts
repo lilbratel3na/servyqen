@@ -6,7 +6,10 @@ import {
   RESEARCH_SERVICE,
 } from "./agentgate-contract";
 import {
+  attachVerifiedResultHash,
   buildDiscoveryPayload,
+  buildPublicProof,
+  canonicalReceiptResult,
   constantTimeHexEqual,
   evaluateExecutionClaim,
   evaluateFailureRecovery,
@@ -15,7 +18,10 @@ import {
   isHex64,
   isTransientExecutionError,
   isValidResearchAmount,
+  orderIdFromProofPath,
+  PROOF_FIELDS,
   randomToken,
+  sha256Hex,
   validateOrderAmount,
   validateOrderRequest,
 } from "./agentgate-machine-pure";
@@ -568,5 +574,244 @@ describe("legacy terminal-failure recovery (pre-retry orders)", () => {
         error: "This operation was aborted",
       }),
     ).toEqual({ ok: false, reason: "not_recoverable_from_failed_retriable" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/proof/:orderId — public proof surface.
+// The order id is an OPAQUE PUBLIC PROOF IDENTIFIER (not a capability);
+// security comes from the endpoint being read-only and this strict
+// allowlist projection, which is what these tests pin down.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/proof/:orderId — path extraction", () => {
+  it("extracts the order id from a well-formed proof path", () => {
+    expect(orderIdFromProofPath("/api/proof/k174abc123")).toBe("k174abc123");
+  });
+
+  it("returns null for malformed paths (no id, extra segments, wrong prefix)", () => {
+    expect(orderIdFromProofPath("/api/proof/")).toBeNull();
+    expect(orderIdFromProofPath("/api/proof/a/b")).toBeNull();
+    expect(orderIdFromProofPath("/api/orders/k174abc123")).toBeNull();
+    expect(orderIdFromProofPath("/api/proofs/k174abc123")).toBeNull();
+    expect(orderIdFromProofPath("/api/proof/k174abc123/run")).toBeNull();
+  });
+});
+
+describe("GET /api/proof/:orderId — allowlist projection", () => {
+  const sampleResult = {
+    sources: [
+      {
+        title: "Attention Is All You Need",
+        authors: ["A. Author"],
+        published: "2017-06-12",
+        absUrl: "https://arxiv.org/abs/1706.03762",
+        pdfUrl: "https://arxiv.org/pdf/1706.03762",
+        summary: "We propose the transformer architecture.",
+      },
+    ],
+    synthesis: "Extractive synthesis for “test query”.",
+    keyFindings: ["[Attention Is All You Need] We propose..."],
+    confidence: 1,
+  };
+
+  const sampleInput = {
+    orderId: "k17431b32f1mqk41b3h0w38whh8ebbrm",
+    serviceId: "ai-research-v1",
+    amount: "1",
+    currency: "USDC",
+    paymentLinkId: "3edba4fa-02e3-48ac-862d-6a236a40e2b7",
+    paymentStatus: "completed",
+    transactionUrl: "https://polygonscan.com/tx/0xabc",
+    executionStatus: "completed",
+    executionAttempts: 1,
+    executedMs: 4213,
+    query: "attention mechanisms for sparse transformers",
+    result: sampleResult as unknown,
+  };
+
+  it("exposes exactly the approved top-level fields — no more, no fewer", () => {
+    const proof = buildPublicProof(sampleInput);
+    expect(Object.keys(proof).sort()).toEqual([...PROOF_FIELDS].sort());
+  });
+
+  it("carries evidence fields through unchanged", () => {
+    const proof = buildPublicProof(sampleInput);
+    expect(proof.orderId).toBe(sampleInput.orderId);
+    expect(proof.serviceId).toBe("ai-research-v1");
+    expect(proof.amount).toBe("1");
+    expect(proof.currency).toBe("USDC");
+    expect(proof.paymentLinkId).toBe("3edba4fa-02e3-48ac-862d-6a236a40e2b7");
+    expect(proof.paymentStatus).toBe("completed");
+    expect(proof.transactionUrl).toBe("https://polygonscan.com/tx/0xabc");
+    expect(proof.executionStatus).toBe("completed");
+    expect(proof.executionAttempts).toBe(1);
+    expect(proof.executedMs).toBe(4213);
+    expect(proof.query).toBe(sampleInput.query);
+    expect(proof.result).toBe(sampleResult);
+  });
+
+  it("fills SLA target and note from the contract", () => {
+    const proof = buildPublicProof(sampleInput);
+    expect(proof.slaTargetMs).toBe(RESEARCH_SERVICE.execution.slaTargetMs);
+    expect(proof.slaNote).toBe(RESEARCH_SERVICE.execution.slaNote);
+  });
+
+  it("NEVER exposes capability tokens, token hashes, user identity, checkout URL, error or failure details", () => {
+    // The projection's signature only accepts allowlisted inputs; sensitive
+    // fields smuggled into the input object must be structurally dropped.
+    const proof = buildPublicProof({
+      ...sampleInput,
+      orderTokenHash: "a".repeat(64),
+      capabilityToken: "b".repeat(64),
+      userId: "user_leak_123",
+      moovePaymentUrl: "https://pay.moove.xyz/checkout-leak",
+      error: "internal_error_details",
+      failureKind: "transient",
+      mooveLinkStatus: "completed",
+    } as typeof sampleInput & Record<string, unknown>);
+    const serialized = JSON.stringify(proof);
+    // Sentinel VALUES planted above must not survive anywhere in the proof.
+    for (const banned of [
+      "a".repeat(64),
+      "b".repeat(64),
+      "user_leak_123",
+      "checkout-leak",
+      "internal_error_details",
+      // And none of the banned field NAMES may appear as keys.
+      '"orderTokenHash"',
+      '"capabilityToken"',
+      '"moovePaymentUrl"',
+      '"paymentUrl"',
+      '"userId"',
+      '"email"',
+      '"error"',
+      '"failureKind"',
+      '"mooveLinkStatus"',
+    ]) {
+      expect(serialized.includes(banned)).toBe(false);
+    }
+    // Only the allowlisted keys exist at the top level.
+    for (const key of Object.keys(proof)) {
+      expect(PROOF_FIELDS).toContain(key);
+    }
+  });
+
+  it("falls back to paymentStatus 'unknown' when no Moove status is persisted", () => {
+    const proof = buildPublicProof({ ...sampleInput, paymentStatus: null });
+    expect(proof.paymentStatus).toBe("unknown");
+  });
+
+  it("attaches the persisted resultHash only when the recomputed hash matches", async () => {
+    const proof = buildPublicProof(sampleInput);
+    const canonicalHash = await sha256Hex(sampleResult);
+    const persisted = `sha256:${canonicalHash}`;
+
+    const verified = await attachVerifiedResultHash(proof, persisted);
+    expect(verified).not.toBeNull();
+    expect(verified!.resultHash).toBe(persisted);
+
+    // Tampered result → the proof must NOT be produced.
+    const tampered = await attachVerifiedResultHash(
+      proof,
+      "sha256:" + "0".repeat(64),
+    );
+    expect(tampered).toBeNull();
+  });
+
+  it("verifies the full chain end-to-end: receipt result hash round-trips", async () => {
+    // Simulate the persisted receipt built by buildReceipt at completion:
+    // the proof must re-verify SHA-256(JSON.stringify(result)) against it.
+    const receiptResult = sampleResult;
+    const resultHash = `sha256:${await sha256Hex(receiptResult)}`;
+    const proof = buildPublicProof({ ...sampleInput, result: receiptResult });
+    const verified = await attachVerifiedResultHash(proof, resultHash);
+    expect(verified).not.toBeNull();
+    expect(verified!.resultHash).toBe(resultHash);
+  });
+});
+
+describe("GET /api/proof/:orderId — canonical result serialization", () => {
+  const constructionOrder = {
+    sources: [{ title: "T", authors: ["A"], published: "2026-01-01", absUrl: "https://arxiv.org/abs/1", pdfUrl: "https://arxiv.org/pdf/1", summary: "S" }],
+    synthesis: "synthesis text",
+    keyFindings: ["finding one"],
+    confidence: 0.8,
+  };
+
+  it("re-imposes the receipt construction key order without copying values", () => {
+    // Convex read-back shape: keys alphabetized by storage.
+    const persisted = {
+      confidence: constructionOrder.confidence,
+      keyFindings: constructionOrder.keyFindings,
+      sources: constructionOrder.sources,
+      synthesis: constructionOrder.synthesis,
+    };
+    const canonical = canonicalReceiptResult(persisted) as Record<string, unknown>;
+    expect(Object.keys(canonical)).toEqual([
+      "sources",
+      "synthesis",
+      "keyFindings",
+      "confidence",
+    ]);
+    // Values pass through by reference — nothing is rebuilt.
+    expect(canonical.sources).toBe(persisted.sources);
+    expect(canonical.synthesis).toBe(persisted.synthesis);
+    expect(canonical.keyFindings).toBe(persisted.keyFindings);
+    expect(canonical.confidence).toBe(persisted.confidence);
+  });
+
+  it("makes a storage-normalized object hash identically to the construction-order original", async () => {
+    const persisted = {
+      confidence: constructionOrder.confidence,
+      keyFindings: constructionOrder.keyFindings,
+      sources: constructionOrder.sources,
+      synthesis: constructionOrder.synthesis,
+    };
+    const constructionHash = await sha256Hex(constructionOrder);
+    const persistedHash = await sha256Hex(persisted);
+    // Storage normalization genuinely breaks plain re-stringification...
+    expect(persistedHash).not.toBe(constructionHash);
+    // ...and canonicalization restores it over the SAME values.
+    const canonicalHash = await sha256Hex(canonicalReceiptResult(persisted));
+    expect(canonicalHash).toBe(constructionHash);
+  });
+
+  it("passes through objects without the four receipt fields unchanged", () => {
+    const odd = { foo: 1, bar: [2, 3] };
+    expect(canonicalReceiptResult(odd)).toBe(odd);
+    expect(canonicalReceiptResult(null)).toBeNull();
+    expect(canonicalReceiptResult("text")).toBe("text");
+  });
+
+  it("endpoint pipeline: normalized persisted receipt verifies against the completion-time hash", async () => {
+    // research.ts hashed the result in construction order at completion.
+    const constructionHash = await sha256Hex(constructionOrder);
+    const persistedHash = `sha256:${constructionHash}`;
+    // ...but storage returns it alphabetized. The endpoint canonicalizes
+    // before hashing/serving, so verification succeeds.
+    const persisted = {
+      confidence: constructionOrder.confidence,
+      keyFindings: constructionOrder.keyFindings,
+      sources: constructionOrder.sources,
+      synthesis: constructionOrder.synthesis,
+    };
+    const proof = buildPublicProof({
+      orderId: "k17431b32f1mqk41b3h0w38whh8ebbrm",
+      serviceId: "ai-research-v1",
+      amount: "1",
+      currency: "USDC",
+      paymentLinkId: "3edba4fa-02e3-48ac-862d-6a236a40e2b7",
+      paymentStatus: "completed",
+      transactionUrl: "https://polygonscan.com/tx/0xabc",
+      executionStatus: "completed",
+      executionAttempts: 1,
+      executedMs: 4213,
+      query: "attention mechanisms for sparse transformers",
+      result: canonicalReceiptResult(persisted),
+    });
+    const verified = await attachVerifiedResultHash(proof, persistedHash);
+    expect(verified).not.toBeNull();
+    expect(verified!.resultHash).toBe(persistedHash);
   });
 });

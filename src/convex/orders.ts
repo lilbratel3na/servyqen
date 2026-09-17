@@ -358,6 +358,39 @@ export const getByTokenHashInternal = internalQuery({
 });
 
 /**
+ * Internal: raw fetch of an order plus its persisted result and receipt for
+ * the public proof endpoint (GET /api/proof/:orderId). Read-only, no auth:
+ * the HTTP layer serves ONLY the allowlist projection (buildPublicProof) of
+ * these rows — never the raw rows, token hashes, user identity, or payment
+ * URL. Unknown ids return null and the endpoint answers 404.
+ */
+export const getProofInternal = internalQuery({
+  args: { orderId: v.id("orders") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    order: Doc<"orders">;
+    result: Doc<"researchResults"> | null;
+    receipt: Doc<"receipts"> | null;
+  } | null> => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) return null;
+    const result =
+      (await ctx.db
+        .query("researchResults")
+        .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+        .first()) ?? null;
+    const receipt =
+      (await ctx.db
+        .query("receipts")
+        .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+        .first()) ?? null;
+    return { order, result, receipt };
+  },
+});
+
+/**
  * Public query: the signed-in user's orders, newest first.
  * The frontend can NEVER mark a payment confirmed — it can only observe
  * status, which only server-side Moove polling mutates.

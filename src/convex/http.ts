@@ -1,14 +1,19 @@
 import { httpRouter } from "convex/server";
 import type { GenericActionCtx } from "convex/server";
+import type { FunctionReturnType } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { auth } from "./auth";
 import { RESEARCH_SERVICE } from "../lib/agentgate-contract";
 import {
+  attachVerifiedResultHash,
   buildDiscoveryPayload,
+  canonicalReceiptResult,
+  buildPublicProof,
   hashToken,
   isHex64,
+  orderIdFromProofPath,
   randomToken,
   validateOrderRequest,
 } from "../lib/agentgate-machine-pure";
@@ -43,7 +48,11 @@ function bearerToken(request: Request): string {
   return isHex64(token) ? token : "";
 }
 
-/** Extract an order id from /api/orders/:id or /api/orders/:id/run. */
+/**
+ * Extract an order id from /api/orders/:id or /api/orders/:id/run.
+ * (The /api/proof/:id extractor lives in agentgate-machine-pure.ts so it can
+ * be unit-tested; see orderIdFromProofPath.)
+ */
 function orderIdFromPath(pathname: string): string | null {
   const m = pathname.match(/^\/api\/orders\/([^/]+?)(?:\/run)?$/);
   return m?.[1] ?? null;
@@ -259,6 +268,100 @@ export const runOrder = httpAction(async (ctx, request) => {
 });
 
 /**
+ * GET /api/proof/:orderId — public, read-only proof surface.
+ *
+ * Purpose: lets a stranger/reviewer independently verify the evidence chain
+ * ProofFlow order → exact Moove payment → completed execution → result →
+ * result hash, holding nothing but the order id.
+ *
+ * Security model: the order id is an OPAQUE PUBLIC PROOF IDENTIFIER (not a
+ * cryptographic capability). Security comes from this endpoint being strictly
+ * read-only and serving ONLY the allowlist projection (buildPublicProof) —
+ * never capability tokens/hashes, user/session identity, the live checkout
+ * payment URL, internal error details, or arbitrary order fields.
+ *
+ * Hash integrity: `result` is served exactly as PERSISTED (the canonical
+ * receipt/result object) and the proof is only produced when
+ * SHA-256(JSON.stringify(result)) re-verifies against the persisted
+ * resultHash — an unverified chain is a 500, never a quietly wrong proof.
+ */
+export const publicProof = httpAction(async (ctx, request) => {
+  const orderId = orderIdFromProofPath(new URL(request.url).pathname);
+  if (!orderId) return errorJson(404, "not_found");
+
+  let found: FunctionReturnType<typeof internal.orders.getProofInternal> | null;
+  try {
+    found = await ctx.runQuery(internal.orders.getProofInternal, {
+      orderId: orderId as Id<"orders">,
+    });
+  } catch {
+    // Malformed/non-existent id shape: indistinguishable from not found.
+    return errorJson(404, "not_found");
+  }
+  if (!found) return errorJson(404, "not_found");
+
+  // Canonical result: the PERSISTED receipt's result values imposed in the
+  // receipt construction order (buildReceipt hashed over that order; Convex
+  // storage normalizes object key order on read-back, so the persisted object
+  // can never re-stringify to the original hash bytes without this). Values
+  // pass through by reference — nothing is rebuilt. The researchResults
+  // fallback (receipt somehow absent) is the same persisted data, same
+  // normalization, canonicalized identically.
+  const persistedReceiptResult =
+    (
+      found.receipt?.receipt as
+        | { result?: Record<string, unknown> }
+        | undefined
+    )?.result ?? null;
+  const canonicalResult = canonicalReceiptResult(
+    persistedReceiptResult ??
+      (found.result
+        ? {
+            sources: found.result.sources,
+            synthesis: found.result.synthesis,
+            keyFindings: found.result.keyFindings,
+            confidence: found.result.confidence,
+          }
+        : null),
+  );
+
+  const proof = buildPublicProof({
+    orderId: found.order._id,
+    serviceId: found.order.serviceId,
+    amount: found.order.amount,
+    currency: found.order.currency,
+    paymentLinkId: found.order.moovePaymentLinkId ?? null,
+    // Receipt's paymentStatus is the persisted Moove evidence at completion;
+    // fall back to the order's observed link status ("unknown" if neither).
+    paymentStatus:
+      (found.receipt?.receipt as { paymentStatus?: string } | undefined)
+        ?.paymentStatus ??
+      found.order.mooveLinkStatus ??
+      null,
+    transactionUrl: found.order.mooveTransactionUrl ?? null,
+    executionStatus: found.order.status,
+    executionAttempts: found.order.executionAttempts ?? null,
+    executedMs: found.order.executedMs ?? null,
+    query: found.order.query,
+    result: canonicalResult,
+  });
+
+  const persistedResultHash =
+    (found.receipt?.receipt as { resultHash?: string } | undefined)
+      ?.resultHash ?? "";
+  const verified = await attachVerifiedResultHash(proof, persistedResultHash);
+  if (!verified) {
+    // Integrity failure: serve nothing rather than a wrong proof.
+    return errorJson(500, "result_hash_verification_failed");
+  }
+
+  return new Response(JSON.stringify(verified, null, 2), {
+    status: 200,
+    headers: jsonHeaders,
+  });
+});
+
+/**
  * Dispatcher for POSTs under /api/orders/ — Convex routes support exact
  * paths or prefixes, not wildcard segments, so :id/run is matched here.
  */
@@ -305,6 +408,12 @@ http.route({
   path: "/api/orders",
   method: "POST",
   handler: createOrder,
+});
+
+http.route({
+  pathPrefix: "/api/proof/",
+  method: "GET",
+  handler: publicProof,
 });
 
 http.route({

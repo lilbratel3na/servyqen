@@ -16,6 +16,133 @@ import { RESEARCH_SERVICE } from "./agentgate-contract";
 
 const encoder = new TextEncoder();
 
+/**
+ * Pure projection of the PUBLIC PROOF surface for GET /api/proof/:orderId.
+ *
+ * Security model: the order id is an OPAQUE PUBLIC PROOF IDENTIFIER, not a
+ * capability. Security comes from the endpoint being strictly read-only and
+ * this allowlist projection — the proof can only ever expose evidence
+ * fields, never capability tokens/hashes, user/session identity, the live
+ * checkout/payment URL, internal error details, or arbitrary order fields.
+ * The allowlist is enforced HERE (pure, unit-tested), not at the call site.
+ */
+/** Exact top-level fields exposed by GET /api/proof/:orderId. */
+export const PROOF_FIELDS = [
+  "orderId",
+  "serviceId",
+  "amount",
+  "currency",
+  "paymentLinkId",
+  "paymentStatus",
+  "transactionUrl",
+  "executionStatus",
+  "executionAttempts",
+  "executedMs",
+  "slaTargetMs",
+  "slaNote",
+  "query",
+  "result",
+  "resultHash",
+] as const;
+
+export type PublicProof = Record<(typeof PROOF_FIELDS)[number], unknown>;
+
+/**
+ * Build the public proof payload from PERSISTED transaction data.
+ * `result` is passed through AS PERSISTED (the canonical receipt/result
+ * object) — never reconstructed — so JSON key ordering is unchanged and
+ * sha256(JSON.stringify(result)) reproduces the persisted resultHash.
+ */
+export function buildPublicProof(input: {
+  orderId: string;
+  serviceId: string;
+  amount: string;
+  currency: string;
+  paymentLinkId: string | null;
+  paymentStatus: string | null;
+  transactionUrl: string | null;
+  executionStatus: string;
+  executionAttempts: number | null;
+  executedMs: number | null;
+  query: string;
+  result: unknown | null;
+}): PublicProof {
+  return {
+    orderId: input.orderId,
+    serviceId: input.serviceId,
+    amount: input.amount,
+    currency: input.currency,
+    paymentLinkId: input.paymentLinkId,
+    paymentStatus: input.paymentStatus ?? "unknown",
+    transactionUrl: input.transactionUrl,
+    executionStatus: input.executionStatus,
+    executionAttempts: input.executionAttempts,
+    executedMs: input.executedMs,
+    slaTargetMs: RESEARCH_SERVICE.execution.slaTargetMs,
+    slaNote: RESEARCH_SERVICE.execution.slaNote,
+    query: input.query,
+    result: input.result,
+    resultHash: null,
+  };
+}
+
+/** SHA-256 over the canonical JSON of `result` (WebCrypto, hex). */
+export async function sha256Hex(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(JSON.stringify(value)),
+  );
+  return Array.from(new Uint8Array(digest), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+/**
+ * Impose the receipt construction key order (sources, synthesis, keyFindings,
+ * confidence — the order buildReceipt/research.ts hash over) onto a persisted
+ * result object WITHOUT copying or altering values. Convex storage normalizes
+ * object key order on read-back (alphabetically), so the persisted object can
+ * never re-stringify to the original hash bytes; re-imposing the fixed
+ * construction order over the SAME persisted values is the only faithful
+ * reproduction. Values are passed through by reference — nothing is rebuilt.
+ */
+export function canonicalReceiptResult(result: unknown): unknown {
+  if (
+    typeof result === "object" &&
+    result !== null &&
+    "sources" in result &&
+    "synthesis" in result &&
+    "keyFindings" in result &&
+    "confidence" in result
+  ) {
+    const r = result as Record<string, unknown>;
+    return {
+      sources: r.sources,
+      synthesis: r.synthesis,
+      keyFindings: r.keyFindings,
+      confidence: r.confidence,
+    };
+  }
+  return result;
+}
+
+/**
+ * Attach the verified resultHash to a proof payload. Returns null when the
+ * recomputed SHA-256(JSON.stringify(result)) does NOT equal the persisted
+ * hash — the proof is never served with an unverified integrity chain.
+ * `result` must already be in canonical construction order (see
+ * canonicalReceiptResult) so what is served is exactly what was hashed.
+ */
+export async function attachVerifiedResultHash(
+  proof: PublicProof,
+  persistedResultHash: string,
+): Promise<PublicProof | null> {
+  const recomputed = await sha256Hex(proof.result);
+  const expected = persistedResultHash.replace(/^sha256:/, "");
+  if (recomputed !== expected) return null;
+  return { ...proof, resultHash: persistedResultHash };
+}
+
 const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
@@ -35,6 +162,15 @@ export function randomToken(): string {
 export async function hashToken(token: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(token));
   return toHex(new Uint8Array(digest));
+}
+
+/**
+ * Extract the order id from a /api/proof/:orderId pathname. Returns null for
+ * malformed paths (no segment, or extra segments) — the endpoint answers 404.
+ */
+export function orderIdFromProofPath(pathname: string): string | null {
+  const m = pathname.match(/^\/api\/proof\/([^/]+?)$/);
+  return m?.[1] ?? null;
 }
 
 /**
