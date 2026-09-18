@@ -1,9 +1,13 @@
-# AgentGate (ProofFlow V1)
+# Servyqen
 
-AgentGate is a **machine-to-service commerce layer**: an AI agent discovers a service,
+Servyqen is a **machine-to-service commerce layer**: an AI agent discovers a service,
 reads its machine-readable service contract, requests an exact per-order price, pays
 through **Moove's hosted payment flow**, waits for **server-side Moove payment
 confirmation**, and then receives a **verified machine-readable result and receipt**.
+
+Machine-facing protocol identifiers are unchanged for compatibility: the wire-protocol
+string `AgentGate/1.0` (served by the discovery index and contract endpoints) and the
+`agentgate-contract.ts` module name are part of the published machine contract.
 
 The first service is an **AI Research service**: given a query, it returns exactly five
 real arXiv sources, a deterministic extractive synthesis, one key finding per source,
