@@ -36,7 +36,7 @@ export const RESEARCH_SERVICE = {
     "Given a research query, retrieves five real, verifiable academic sources and returns a machine-readable research result: exactly 5 sources, a synthesis, key findings, and a confidence score.",
   protocol: "AgentGate/1.0",
   provider: {
-    name: "AgentGate (ProofFlow V1)",
+    name: "Servyqen",
     docs: "/api/services/ai-research-v1/contract",
   },
   payment: {

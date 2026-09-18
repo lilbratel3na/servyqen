@@ -271,7 +271,7 @@ export const runOrder = httpAction(async (ctx, request) => {
  * GET /api/proof/:orderId — public, read-only proof surface.
  *
  * Purpose: lets a stranger/reviewer independently verify the evidence chain
- * ProofFlow order → exact Moove payment → completed execution → result →
+ * Servyqen order → exact Moove payment → completed execution → result →
  * result hash, holding nothing but the order id.
  *
  * Security model: the order id is an OPAQUE PUBLIC PROOF IDENTIFIER (not a

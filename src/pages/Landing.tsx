@@ -82,7 +82,7 @@ export default function Landing() {
             aria-label="Home"
           >
             <img src={logo} alt="Logo" className="h-9 w-9 rounded-lg" />
-            <span className="font-bold tracking-tight">ProofFlow</span>
+            <span className="font-bold tracking-tight">Servyqen</span>
           </Link>
         </div>
       </header>
@@ -284,7 +284,7 @@ export default function Landing() {
 
       <footer className="relative z-10 border-t border-white/5 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-5 text-xs text-slate-600 sm:flex-row sm:px-6">
-          <span>ProofFlow V1 · machine-to-service commerce</span>
+          <span>Servyqen · machine-to-service commerce</span>
           <span>
             Payments by Moove Agentic Payments · Sources via the public arXiv
             API

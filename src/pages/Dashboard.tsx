@@ -386,7 +386,7 @@ export default function Dashboard() {
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-6">
           <div className="flex items-center gap-2">
             <LogoDropdown />
-            <span className="font-bold tracking-tight">ProofFlow</span>
+            <span className="font-bold tracking-tight">Servyqen</span>
           </div>
           <a
             href={`${API_BASE}/api/services/ai-research-v1/contract`}
