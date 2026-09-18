@@ -347,22 +347,22 @@ same payment evidence — no second payment link, no second charge.
 
 ```bash
 # discovery + contract (live machine API base)
-curl https://greedy-wildcat-231.convex.site/api/services
-curl https://greedy-wildcat-231.convex.site/api/services/ai-research-v1/contract
+curl https://loyal-wren-349.convex.site/api/services
+curl https://loyal-wren-349.convex.site/api/services/ai-research-v1/contract
 
 # create an order (returns the one-time capability token)
-curl -X POST https://greedy-wildcat-231.convex.site/api/orders \
+curl -X POST https://loyal-wren-349.convex.site/api/orders \
   -H "Content-Type: application/json" \
   -d '{"query":"transformer scaling"}'
 
 # authorized reads/runs
-curl https://greedy-wildcat-231.convex.site/api/orders/<ORDER_ID> \
+curl https://loyal-wren-349.convex.site/api/orders/<ORDER_ID> \
   -H "Authorization: Bearer <CAPABILITY_TOKEN>"
-curl -X POST https://greedy-wildcat-231.convex.site/api/orders/<ORDER_ID>/run \
+curl -X POST https://loyal-wren-349.convex.site/api/orders/<ORDER_ID>/run \
   -H "Authorization: Bearer <CAPABILITY_TOKEN>"
 
 # public, read-only proof surface for a completed order
-curl https://greedy-wildcat-231.convex.site/api/proof/<ORDER_ID>
+curl https://loyal-wren-349.convex.site/api/proof/<ORDER_ID>
 ```
 
 The base URL above is the current live machine API host (the `*.convex.site`
