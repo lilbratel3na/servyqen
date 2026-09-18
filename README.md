@@ -307,10 +307,22 @@ evidence that the flow works as documented:
 - Receipt reported `paymentStatus: "completed"` with a Moove transaction URL and a
   `sha256` result hash.
 
-Placeholders only (real values are not published here): order id `<ORDER_ID>`,
-payment link `<MOOVE_PAYMENT_LINK_ID>`, payment URL
-`https://www.moove.xyz/@<HANDLE>/pay/<MOOVE_PAYMENT_LINK_ID>`, transaction URL
-`<ON_CHAIN_TRANSACTION_URL>`. The capability token is never published.
+### Verified Transaction evidence card
+
+**These are records from a previous completed run — not a live transaction.**
+Both links are real, public, and directly checkable:
+
+- **Moove payment-link record (API resource — returns JSON status):**
+  <https://api.moove.xyz/v1/payment-link/3edba4fa-02e3-48ac-862d-6a236a40e2b7>
+  This is the payment-link **API record**, not the hosted payer checkout page.
+- **Moove transaction (public transaction page):**
+  <https://moove.xyz/tx/169e583b-865f-4438-9718-0c7bf023f172>
+  This is the transaction URL recorded on the receipt (Moove redirects it to
+  `https://www.moove.xyz/tx/…`).
+
+Not published here: the order id and the hosted payer checkout URL
+(`https://www.moove.xyz/@<HANDLE>/pay/<MOOVE_PAYMENT_LINK_ID>`). The capability
+token is never published, by design.
 
 This transaction also validated the retry path: an earlier attempt failed with an
 arXiv timeout, landed in `failed_retriable`, and a later rerun completed using the
@@ -334,23 +346,27 @@ same payment evidence — no second payment link, no second charge.
 ## Testing the machine API
 
 ```bash
-# discovery + contract
-curl https://<CONVEX_SITE_HOST>/api/services
-curl https://<CONVEX_SITE_HOST>/api/services/ai-research-v1/contract
+# discovery + contract (live machine API base)
+curl https://greedy-wildcat-231.convex.site/api/services
+curl https://greedy-wildcat-231.convex.site/api/services/ai-research-v1/contract
 
 # create an order (returns the one-time capability token)
-curl -X POST https://<CONVEX_SITE_HOST>/api/orders \
+curl -X POST https://greedy-wildcat-231.convex.site/api/orders \
   -H "Content-Type: application/json" \
   -d '{"query":"transformer scaling"}'
 
 # authorized reads/runs
-curl https://<CONVEX_SITE_HOST>/api/orders/<ORDER_ID> \
+curl https://greedy-wildcat-231.convex.site/api/orders/<ORDER_ID> \
   -H "Authorization: Bearer <CAPABILITY_TOKEN>"
-curl -X POST https://<CONVEX_SITE_HOST>/api/orders/<ORDER_ID>/run \
+curl -X POST https://greedy-wildcat-231.convex.site/api/orders/<ORDER_ID>/run \
   -H "Authorization: Bearer <CAPABILITY_TOKEN>"
+
+# public, read-only proof surface for a completed order
+curl https://greedy-wildcat-231.convex.site/api/proof/<ORDER_ID>
 ```
 
-Replace `<CONVEX_SITE_HOST>` with the deployment's `*.convex.site` host.
+The base URL above is the current live machine API host (the `*.convex.site`
+host of the Servyqen Convex deployment).
 Creating an order creates a real Moove payment link — do not pay it unless you
 intend to spend 1+ USDC.
 
